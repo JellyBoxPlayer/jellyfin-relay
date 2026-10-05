@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - run: dotnet test --nologo
+      - id: package
+        run: echo "zip=$(./package.sh | tail -1)" >> "$GITHUB_OUTPUT"
+      - run: gh release download --repo "$GITHUB_REPOSITORY" --pattern manifest.json --output previous.json
+        continue-on-error: true
+      - run: |
+          zip=${{ steps.package.outputs.zip }}
+          url=https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$(basename "$zip")
+          ./manifest.sh "$zip" "$url" $(test -f previous.json && echo previous.json) > manifest.json
+          gh release create "$GITHUB_REF_NAME" "$zip" manifest.json --title "$GITHUB_REF_NAME" --notes "$(sed -n 's/^changelog: "\(.*\)"/\1/p' build.yaml)"

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JellyBox Remote Access</title>
+</head>
+<body>
+    <div id="JellyboxRemotePage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button">
+        <div data-role="content">
+            <div class="content-primary">
+                <h2 class="sectionTitle">JellyBox Remote Access</h2>
+                <p>Makes this server reachable from JellyBox outside your home network, without opening ports.</p>
+
+                <div class="paperList" style="padding: 1em 1.2em; margin-bottom: 2em;">
+                    <div><strong>Status:</strong> <span id="jbxState">Loading…</span></div>
+                    <div id="jbxUrlRow" style="display: none; margin-top: .6em;">
+                        <strong>Address for JellyBox:</strong>
+                        <code id="jbxUrl" style="user-select: all; word-break: break-all;"></code>
+                    </div>
+                    <div id="jbxMessage" class="fieldDescription" style="margin-top: .6em;"></div>
+                </div>
+
+                <form id="JellyboxRemoteForm">
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="jbxToken">Token</label>
+                        <input id="jbxToken" name="Token" type="password" is="emby-input" autocomplete="off" />
+                        <div class="fieldDescription">
+                            Create a token with the <em>Publish a music server</em> permission in your Jellybox Cloud account, then paste it here.
+                        </div>
+                    </div>
+
+                    <details style="margin-bottom: 1.5em;">
+                        <summary>Advanced</summary>
+                        <div class="inputContainer" style="margin-top: 1em;">
+                            <label class="inputLabel inputLabelUnfocused" for="jbxRelayUrl">Relay address</label>
+                            <input id="jbxRelayUrl" name="RelayUrl" type="text" is="emby-input" />
+                            <div class="fieldDescription">Leave as is unless you run your own relay.</div>
+                        </div>
+                    </details>
+
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Save</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            (function () {
+                var pluginId = '5f0c3d2e-8b1a-4c6e-9f47-2a61d3b8e9c4';
+                var defaultRelay = 'wss://cloud.jellybox.app/relay/agent';
+                var labels = {
+                    NotConfigured: 'Not set up. Paste a token below.',
+                    Connecting: 'Connecting…',
+                    Connected: 'Connected',
+                    TokenRefused: 'The relay refused this token',
+                    Disconnected: 'Disconnected, retrying'
+                };
+                var page = document.querySelector('#JellyboxRemotePage');
+                var timer = null;
+
+                function refresh() {
+                    ApiClient.getJSON(ApiClient.getUrl('JellyboxRemote/Status')).then(function (status) {
+                        page.querySelector('#jbxState').textContent = labels[status.State] || status.State;
+                        page.querySelector('#jbxUrlRow').style.display = status.Url ? 'block' : 'none';
+                        page.querySelector('#jbxUrl').textContent = status.Url || '';
+                        page.querySelector('#jbxMessage').textContent = status.Message || '';
+                    });
+                }
+
+                page.addEventListener('pageshow', function () {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                        page.querySelector('#jbxToken').value = config.Token || '';
+                        page.querySelector('#jbxRelayUrl').value = config.RelayUrl || defaultRelay;
+                        Dashboard.hideLoadingMsg();
+                    });
+                    refresh();
+                    timer = setInterval(refresh, 3000);
+                });
+
+                page.addEventListener('pagehide', function () {
+                    clearInterval(timer);
+                });
+
+                page.querySelector('#JellyboxRemoteForm').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                        config.Token = page.querySelector('#jbxToken').value.trim();
+                        config.RelayUrl = page.querySelector('#jbxRelayUrl').value.trim() || defaultRelay;
+                        ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                            setTimeout(refresh, 1000);
+                        });
+                    });
+                    return false;
+                });
+            })();
+        </script>
+    </div>
+</body>
+</html>
