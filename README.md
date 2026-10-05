@@ -12,12 +12,11 @@ Requires Jellyfin 10.11.
    `https://github.com/avdept/jellyfin-plugin-jellybox/releases/latest/download/manifest.json`.
 2. Dashboard → Plugins → Catalog → install JellyBox Remote Access and restart
    Jellyfin.
-3. In your Jellybox Cloud account, create a token with the *Publish a music
-   server* permission.
-4. Dashboard → Plugins → JellyBox Remote Access: paste the token and save.
+3. Dashboard → Plugins → JellyBox Remote Access → *Link to Jellybox Cloud*.
+4. Open the link the page shows, sign in, and enter the code.
 
-The page then shows the address to use in JellyBox. It stays the same across
-restarts.
+The page then shows the server as connected. JellyBox picks up the remote
+address by itself the next time it is used on your home network.
 
 ## Installing by hand
 

@@ -4,9 +4,9 @@ namespace Jellyfin.Plugin.JellyboxRemote.Configuration;
 
 public class PluginConfiguration : BasePluginConfiguration
 {
-    public const string DefaultRelayUrl = "wss://cloud.jellybox.app/relay/agent";
+    public const string DefaultCloudUrl = "https://cloud.jellybox.app";
 
     public string Token { get; set; } = string.Empty;
 
-    public string RelayUrl { get; set; } = DefaultRelayUrl;
+    public string CloudUrl { get; set; } = DefaultCloudUrl;
 }

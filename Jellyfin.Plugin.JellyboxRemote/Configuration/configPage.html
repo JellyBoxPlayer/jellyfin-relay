@@ -11,83 +11,164 @@
                 <h2 class="sectionTitle">JellyBox Remote Access</h2>
                 <p>Makes this server reachable from JellyBox outside your home network, without opening ports.</p>
 
-                <div class="paperList" style="padding: 1em 1.2em; margin-bottom: 2em;">
-                    <div><strong>Status:</strong> <span id="jbxState">Loading…</span></div>
+                <div id="jbxUnlinked" class="paperList" style="display: none; padding: 1em 1.2em; margin-bottom: 2em;">
+                    <p style="margin-top: 0;">Link this server to your Jellybox Cloud account to turn on remote access.</p>
+                    <button id="jbxLink" is="emby-button" type="button" class="raised button-submit emby-button">
+                        <span>Link to Jellybox Cloud</span>
+                    </button>
+                    <div id="jbxPairingMessage" class="fieldDescription" style="margin-top: .8em;"></div>
+                </div>
+
+                <div id="jbxPairing" class="paperList" style="display: none; padding: 1em 1.2em; margin-bottom: 2em;">
+                    <p style="margin-top: 0;">
+                        Open <a id="jbxVerify" target="_blank" rel="noopener" class="button-link"></a>,
+                        sign in, and enter this code:
+                    </p>
+                    <div id="jbxCode" style="font-size: 2em; font-family: monospace; letter-spacing: .15em; margin: .4em 0 .6em; user-select: all;"></div>
+                    <div class="fieldDescription">Waiting for you to approve it. This page updates by itself.</div>
+                    <button id="jbxCancel" is="emby-button" type="button" class="raised emby-button" style="margin-top: 1em;">
+                        <span>Cancel</span>
+                    </button>
+                </div>
+
+                <div id="jbxLinked" class="paperList" style="display: none; padding: 1em 1.2em; margin-bottom: 2em;">
+                    <div><strong>Status:</strong> <span id="jbxState"></span></div>
                     <div id="jbxUrlRow" style="display: none; margin-top: .6em;">
                         <strong>Address for JellyBox:</strong>
                         <code id="jbxUrl" style="user-select: all; word-break: break-all;"></code>
                     </div>
                     <div id="jbxMessage" class="fieldDescription" style="margin-top: .6em;"></div>
+                    <div class="fieldDescription" style="margin-top: .6em;">
+                        JellyBox picks this address up by itself the next time it is used at home.
+                    </div>
+                    <button id="jbxUnlink" is="emby-button" type="button" class="raised emby-button" style="margin-top: 1em;">
+                        <span>Unlink</span>
+                    </button>
                 </div>
 
-                <form id="JellyboxRemoteForm">
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="jbxToken">Token</label>
-                        <input id="jbxToken" name="Token" type="password" is="emby-input" autocomplete="off" />
-                        <div class="fieldDescription">
-                            Create a token with the <em>Publish a music server</em> permission in your Jellybox Cloud account, then paste it here.
+                <details style="margin-bottom: 1.5em;">
+                    <summary>Advanced</summary>
+                    <form id="JellyboxRemoteForm" style="margin-top: 1em;">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="jbxCloudUrl">Cloud address</label>
+                            <input id="jbxCloudUrl" name="CloudUrl" type="text" is="emby-input" />
+                            <div class="fieldDescription">Leave as is unless you run your own cloud.</div>
                         </div>
-                    </div>
-
-                    <details style="margin-bottom: 1.5em;">
-                        <summary>Advanced</summary>
-                        <div class="inputContainer" style="margin-top: 1em;">
-                            <label class="inputLabel inputLabelUnfocused" for="jbxRelayUrl">Relay address</label>
-                            <input id="jbxRelayUrl" name="RelayUrl" type="text" is="emby-input" />
-                            <div class="fieldDescription">Leave as is unless you run your own relay.</div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="jbxToken">Token</label>
+                            <input id="jbxToken" name="Token" type="password" is="emby-input" autocomplete="off" />
+                            <div class="fieldDescription">Filled in by linking. You can also paste a token with the <em>Publish a music server</em> permission.</div>
                         </div>
-                    </details>
-
-                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
-                        <span>Save</span>
-                    </button>
-                </form>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </form>
+                </details>
             </div>
         </div>
         <script type="text/javascript">
             (function () {
                 var pluginId = '5f0c3d2e-8b1a-4c6e-9f47-2a61d3b8e9c4';
-                var defaultRelay = 'wss://cloud.jellybox.app/relay/agent';
+                var defaultCloud = 'https://cloud.jellybox.app';
                 var labels = {
-                    NotConfigured: 'Not set up. Paste a token below.',
+                    NotConfigured: 'Not linked',
                     Connecting: 'Connecting…',
                     Connected: 'Connected',
-                    TokenRefused: 'The relay refused this token',
+                    TokenRefused: 'Jellybox Cloud refused this server. Unlink and link it again.',
                     Disconnected: 'Disconnected, retrying'
                 };
                 var page = document.querySelector('#JellyboxRemotePage');
                 var timer = null;
+                var linked = null;
+
+                function show(id, visible) {
+                    page.querySelector(id).style.display = visible ? 'block' : 'none';
+                }
+
+                function render(status) {
+                    var pairing = status.Pairing;
+                    var waiting = !!pairing && pairing.State === 'Waiting';
+                    if (linked !== null && linked !== status.Linked) {
+                        loadConfig();
+                    }
+                    linked = status.Linked;
+
+                    show('#jbxLinked', status.Linked);
+                    show('#jbxPairing', !status.Linked && waiting);
+                    show('#jbxUnlinked', !status.Linked && !waiting);
+
+                    page.querySelector('#jbxState').textContent = labels[status.State] || status.State;
+                    show('#jbxUrlRow', !!status.Url);
+                    page.querySelector('#jbxUrl').textContent = status.Url || '';
+                    page.querySelector('#jbxMessage').textContent = status.State === 'Connected' ? '' : (status.Message || '');
+
+                    page.querySelector('#jbxPairingMessage').textContent = pairing && !waiting ? (pairing.Message || '') : '';
+                    if (waiting) {
+                        page.querySelector('#jbxCode').textContent = pairing.Code;
+                        var verify = page.querySelector('#jbxVerify');
+                        verify.href = pairing.VerifyUrlComplete;
+                        verify.textContent = pairing.VerifyUrl.replace(/^https?:\/\//, '');
+                    }
+                }
+
+                function call(method, path) {
+                    return ApiClient.ajax({ type: method, url: ApiClient.getUrl('JellyboxRemote/' + path), dataType: 'json' });
+                }
 
                 function refresh() {
-                    ApiClient.getJSON(ApiClient.getUrl('JellyboxRemote/Status')).then(function (status) {
-                        page.querySelector('#jbxState').textContent = labels[status.State] || status.State;
-                        page.querySelector('#jbxUrlRow').style.display = status.Url ? 'block' : 'none';
-                        page.querySelector('#jbxUrl').textContent = status.Url || '';
-                        page.querySelector('#jbxMessage').textContent = status.Message || '';
+                    call('GET', 'Status').then(render);
+                }
+
+                function loadConfig() {
+                    return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                        page.querySelector('#jbxToken').value = config.Token || '';
+                        page.querySelector('#jbxCloudUrl').value = config.CloudUrl || defaultCloud;
                     });
                 }
 
                 page.addEventListener('pageshow', function () {
                     Dashboard.showLoadingMsg();
-                    ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-                        page.querySelector('#jbxToken').value = config.Token || '';
-                        page.querySelector('#jbxRelayUrl').value = config.RelayUrl || defaultRelay;
-                        Dashboard.hideLoadingMsg();
-                    });
+                    loadConfig().then(Dashboard.hideLoadingMsg);
                     refresh();
-                    timer = setInterval(refresh, 3000);
+                    timer = setInterval(refresh, 2000);
                 });
 
                 page.addEventListener('pagehide', function () {
                     clearInterval(timer);
                 });
 
+                page.querySelector('#jbxLink').addEventListener('click', function () {
+                    Dashboard.showLoadingMsg();
+                    call('POST', 'Pairing').then(function (status) {
+                        Dashboard.hideLoadingMsg();
+                        render(status);
+                    }, Dashboard.hideLoadingMsg);
+                });
+
+                page.querySelector('#jbxCancel').addEventListener('click', function () {
+                    call('DELETE', 'Pairing').then(render);
+                });
+
+                page.querySelector('#jbxUnlink').addEventListener('click', function () {
+                    if (!window.confirm('Unlink this server? JellyBox will stop reaching it from outside your home network.')) {
+                        return;
+                    }
+
+                    call('POST', 'Unlink').then(function (status) {
+                        render(status);
+                        loadConfig();
+                    });
+                });
+
                 page.querySelector('#JellyboxRemoteForm').addEventListener('submit', function (e) {
                     e.preventDefault();
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-                        config.Token = page.querySelector('#jbxToken').value.trim();
-                        config.RelayUrl = page.querySelector('#jbxRelayUrl').value.trim() || defaultRelay;
+                        var token = page.querySelector('#jbxToken').value.trim();
+                        if (token) {
+                            config.Token = token;
+                        }
+                        config.CloudUrl = page.querySelector('#jbxCloudUrl').value.trim() || defaultCloud;
                         ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
                             Dashboard.processPluginConfigurationUpdateResult(result);
                             setTimeout(refresh, 1000);

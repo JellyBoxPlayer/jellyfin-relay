@@ -1,4 +1,5 @@
 using System.Net;
+using Jellyfin.Plugin.JellyboxRemote.Cloud;
 using Jellyfin.Plugin.JellyboxRemote.Tunnel;
 using MediaBrowser.Controller;
 using MediaBrowser.Model.Plugins;
@@ -61,14 +62,14 @@ internal sealed class RelayService(IServerApplicationHost host, RelayStatusStore
             return Task.CompletedTask;
         }
 
-        if (!Uri.TryCreate(configuration.RelayUrl.Trim(), UriKind.Absolute, out var relay))
+        if (!CloudAddress.TryParse(configuration.CloudUrl, out var cloud))
         {
-            status.Report(new TunnelStatus(TunnelState.Disconnected, Message: "The relay address is not a valid URL."));
+            status.Report(new TunnelStatus(TunnelState.Disconnected, Message: "The cloud address is not a valid URL."));
             return Task.CompletedTask;
         }
 
         var options = new TunnelOptions(
-            relay,
+            CloudAddress.Relay(cloud),
             token,
             host.SystemId,
             "jellyfin",
