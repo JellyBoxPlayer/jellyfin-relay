@@ -9,7 +9,7 @@ Requires Jellyfin 10.11.
 ## Setup
 
 1. Dashboard → Plugins → Repositories → add
-   `https://github.com/avdept/jellyfin-plugin-jellybox/releases/latest/download/manifest.json`.
+   `https://github.com/JellyBoxPlayer/jellyfin-relay/releases/latest/download/manifest.json`.
 2. Dashboard → Plugins → Catalog → install JellyBox Remote Access and restart
    Jellyfin.
 3. Dashboard → Plugins → JellyBox Remote Access → *Link to Jellybox Cloud*.
