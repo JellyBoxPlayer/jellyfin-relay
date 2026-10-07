@@ -71,7 +71,7 @@ public class JellyboxRemoteController(RelayStatusStore status, PairingService pa
 
     private StatusView Status()
     {
-        var linked = !string.IsNullOrWhiteSpace(Plugin.Instance?.Configuration.Token);
+        var linked = Plugin.Instance?.Token.IsSet ?? false;
         var held = seats.Seats.Select(s => new SeatView(s.SeatId, s.Label, s.Url)).ToList();
         return new StatusView(status.State, status.Message, linked, pairing.Current, held);
     }

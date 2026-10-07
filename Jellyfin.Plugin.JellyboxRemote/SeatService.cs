@@ -23,7 +23,7 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
     public async Task<SeatLookup> ForUserAsync(Guid userId, CancellationToken cancellationToken)
     {
         var plugin = Plugin.Instance;
-        if (plugin is null || string.IsNullOrWhiteSpace(plugin.Configuration.Token))
+        if (plugin is null || !plugin.Token.IsSet)
         {
             return new SeatLookup(null, "unlinked");
         }
@@ -57,7 +57,7 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
             }
 
             var result = await client.RequestSeatAsync(
-                plugin.Configuration.Token.Trim(),
+                plugin.Token.Current,
                 host.SystemId,
                 userId.ToString("N"),
                 user.Username,
@@ -101,7 +101,7 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
         IReadOnlyList<SeatGrant>? held;
         try
         {
-            held = await client.ListSeatsAsync(plugin.Configuration.Token.Trim(), cancellationToken).ConfigureAwait(false);
+            held = await client.ListSeatsAsync(plugin.Token.Current, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
@@ -146,11 +146,11 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(configuration.Token) && CloudAddress.TryParse(configuration.CloudUrl, out var cloud))
+        if (plugin.Token.IsSet && CloudAddress.TryParse(configuration.CloudUrl, out var cloud))
         {
             try
             {
-                await new PairingClient(Http, cloud).ReleaseSeatAsync(configuration.Token.Trim(), seatId, cancellationToken).ConfigureAwait(false);
+                await new PairingClient(Http, cloud).ReleaseSeatAsync(plugin.Token.Current, seatId, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
             {

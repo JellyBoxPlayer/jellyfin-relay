@@ -13,9 +13,29 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+        Token = new TokenStore(Path.Combine(DataFolderPath, "token"));
+        if (Configuration.Token.Length > 0)
+        {
+            Token.Set(Configuration.Token);
+            Configuration.Token = string.Empty;
+            SaveConfiguration();
+        }
     }
 
     public static Plugin? Instance { get; private set; }
+
+    public TokenStore Token { get; }
+
+    public override void UpdateConfiguration(BasePluginConfiguration configuration)
+    {
+        if (configuration is PluginConfiguration ours && ours.Token.Trim().Length > 0)
+        {
+            Token.Set(ours.Token);
+            ours.Token = string.Empty;
+        }
+
+        base.UpdateConfiguration(configuration);
+    }
 
     public override string Name => "JellyBox Remote Access";
 

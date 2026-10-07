@@ -49,7 +49,7 @@ internal sealed class RelayService(IServerApplicationHost host, RelayStatusStore
     private Task Start(Plugin plugin, X509Certificate2 certificate, CancellationToken cancellationToken)
     {
         var configuration = plugin.Configuration;
-        var token = configuration.Token.Trim();
+        var token = plugin.Token.Current;
         if (token.Length == 0)
         {
             status.Report(new TunnelStatus(TunnelState.NotConfigured));

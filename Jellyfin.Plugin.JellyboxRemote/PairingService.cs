@@ -74,7 +74,7 @@ public sealed class PairingService(IServerApplicationHost host, ILogger<PairingS
     {
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("The plugin is not loaded.");
         var configuration = plugin.Configuration;
-        var token = configuration.Token.Trim();
+        var token = plugin.Token.Current;
         Cancel();
 
         if (token.Length > 0 && CloudAddress.TryParse(configuration.CloudUrl, out var cloud))
@@ -92,7 +92,7 @@ public sealed class PairingService(IServerApplicationHost host, ILogger<PairingS
             }
         }
 
-        configuration.Token = string.Empty;
+        plugin.Token.Clear();
         plugin.UpdateConfiguration(configuration);
         logger.LogInformation("Logged this server out of Jellybox Cloud");
     }
@@ -134,9 +134,8 @@ public sealed class PairingService(IServerApplicationHost host, ILogger<PairingS
             return;
         }
 
-        var configuration = plugin.Configuration;
-        configuration.Token = token;
-        plugin.UpdateConfiguration(configuration);
+        plugin.Token.Set(token);
+        plugin.UpdateConfiguration(plugin.Configuration);
         logger.LogInformation("Linked this server to Jellybox Cloud");
         Cancel();
     }

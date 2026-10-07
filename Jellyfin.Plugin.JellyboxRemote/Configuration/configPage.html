@@ -57,7 +57,7 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="jbxToken">Token</label>
                             <input id="jbxToken" name="Token" type="password" is="emby-input" autocomplete="off" />
-                            <div class="fieldDescription">Filled in by linking. You can also paste a token with the <em>Publish a music server</em> permission.</div>
+                            <div class="fieldDescription">Set by linking and never shown here. Paste a token with the <em>Publish a music server</em> permission to replace it.</div>
                         </div>
                         <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                             <span>Save</span>
@@ -153,7 +153,7 @@
 
                 function loadConfig() {
                     return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-                        page.querySelector('#jbxToken').value = config.Token || '';
+                        page.querySelector('#jbxToken').value = '';
                         page.querySelector('#jbxCloudUrl').value = config.CloudUrl || defaultCloud;
                     });
                 }

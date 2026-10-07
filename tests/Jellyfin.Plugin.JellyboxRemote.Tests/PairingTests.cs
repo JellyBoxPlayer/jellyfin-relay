@@ -143,6 +143,17 @@ public sealed class PairingTests
         Assert.False(CloudAddress.TryParse("ftp://cloud.jellybox.app", out _));
     }
 
+    [Theory]
+    [InlineData("http://localhost:4000", true)]
+    [InlineData("http://10.0.0.5:4000", true)]
+    [InlineData("http://mibra.local", true)]
+    [InlineData("http://cloud.jellybox.app", false)]
+    [InlineData("http://8.8.8.8", false)]
+    public void Plain_http_is_only_for_the_local_network(string address, bool accepted)
+    {
+        Assert.Equal(accepted, CloudAddress.TryParse(address, out _));
+    }
+
     private static PairingClient Client(FakeCloud cloud) =>
         new(new HttpClient(cloud), Cloud) { MinimumInterval = TimeSpan.FromMilliseconds(10) };
 
