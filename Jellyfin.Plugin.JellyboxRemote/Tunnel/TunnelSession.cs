@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -117,7 +116,7 @@ internal sealed class TunnelSession(
         switch (frame.Type)
         {
             case FrameType.Connect when stream is null:
-                Open(frame.Stream, Encoding.UTF8.GetString(frame.Payload.Span));
+                Open(frame.Stream);
                 break;
             case FrameType.Data:
                 stream?.OnData(frame.Payload);
@@ -138,9 +137,9 @@ internal sealed class TunnelSession(
         }
     }
 
-    private void Open(uint id, string clientIp)
+    private void Open(uint id)
     {
-        var pipe = new TunnelPipe(id, this, target, certificate, clientIp.Length == 0 ? "unknown" : clientIp, logger);
+        var pipe = new TunnelPipe(id, this, target, certificate, logger);
         _streams[id] = pipe;
         _ = Task.Run(pipe.RunAsync, CancellationToken.None);
     }

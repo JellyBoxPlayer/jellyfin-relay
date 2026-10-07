@@ -103,6 +103,21 @@ internal sealed class PairingClient(HttpClient http, Uri cloud)
         }
     }
 
+    public async Task<IReadOnlyList<SeatGrant>?> ListSeatsAsync(string token, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, Endpoint("api/v1/seats"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        var listed = await response.Content.ReadFromJsonAsync<SeatList>(cancellationToken).ConfigureAwait(false);
+        return listed?.Seats ?? [];
+    }
+
     public async Task ReleaseSeatAsync(string token, string seatId, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Delete, Endpoint("api/v1/seats/" + Uri.EscapeDataString(seatId)));
@@ -155,4 +170,6 @@ internal sealed class PairingClient(HttpClient http, Uri cloud)
     private Uri Endpoint(string path) => new(new Uri(cloud.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/"), path);
 
     private sealed record Linked([property: JsonPropertyName("token")] string? Token);
+
+    private sealed record SeatList([property: JsonPropertyName("seats")] List<SeatGrant>? Seats);
 }

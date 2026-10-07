@@ -1,30 +1,14 @@
 using System.Net.Security;
-using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyboxRemote.Tunnel;
 
-internal sealed class TunnelPipe(
-    uint id,
-    TunnelSession session,
-    Uri target,
-    X509Certificate2 certificate,
-    string clientIp,
-    ILogger logger) : IDisposable
+internal sealed class TunnelPipe(uint id, TunnelSession session, Uri target, X509Certificate2 certificate, ILogger logger)
+    : IDisposable
 {
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(15);
-
-    private static readonly HttpClient Upstream = new(new SocketsHttpHandler
-    {
-        AllowAutoRedirect = false,
-        AutomaticDecompression = DecompressionMethods.None,
-        UseCookies = false,
-        UseProxy = false,
-    })
-    {
-        Timeout = Timeout.InfiniteTimeSpan,
-    };
 
     private readonly MuxStream _app = new(id, session);
     private readonly CancellationTokenSource _cancel = new();
@@ -72,14 +56,13 @@ internal sealed class TunnelPipe(
                     await tls.AuthenticateAsServerAsync(options, handshake.Token).ConfigureAwait(false);
                 }
 
-                await new HttpForwarder(Upstream, target, clientIp).RunAsync(tls, token).ConfigureAwait(false);
-                try
-                {
-                    await tls.ShutdownAsync().ConfigureAwait(false);
-                }
-                catch (IOException)
-                {
-                }
+                using var upstream = new TcpClient { NoDelay = true };
+                await upstream.ConnectAsync(target.Host, target.Port, token).ConfigureAwait(false);
+                var server = upstream.GetStream();
+
+                var fromApp = CopyThenAsync(tls, server, () => upstream.Client.Shutdown(SocketShutdown.Send), token);
+                var toApp = CopyThenAsync(server, tls, () => tls.ShutdownAsync(), token);
+                await Task.WhenAll(fromApp, toApp).ConfigureAwait(false);
             }
 
             session.Send(Frame.Encode(FrameType.End, id));
@@ -97,5 +80,25 @@ internal sealed class TunnelPipe(
             session.Forget(id);
             Dispose();
         }
+    }
+
+    private static Task CopyThenAsync(Stream from, Stream to, Action then, CancellationToken token) =>
+        CopyThenAsync(from, to, () =>
+        {
+            then();
+            return Task.CompletedTask;
+        }, token);
+
+    private static async Task CopyThenAsync(Stream from, Stream to, Func<Task> then, CancellationToken token)
+    {
+        try
+        {
+            await from.CopyToAsync(to, token).ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+        }
+
+        await then().ConfigureAwait(false);
     }
 }

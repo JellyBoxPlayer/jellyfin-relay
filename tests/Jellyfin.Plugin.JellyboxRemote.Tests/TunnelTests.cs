@@ -105,51 +105,6 @@ public sealed class TunnelTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Jellyfin_is_told_the_listeners_real_address()
-    {
-        Start();
-        var relay = await _relay.NextConnectionAsync();
-
-        await using var tls = await relay.OpenTlsAsync(_certificate);
-        var (status, body) = await HttpAsync(tls, "GET", "/who", extraHeaders: "X-Emby-Token: tok\r\nX-Forwarded-For: 10.0.0.1\r\n");
-
-        Assert.Equal(200, status);
-        var parts = Encoding.UTF8.GetString(body).Split('|');
-        Assert.Equal("203.0.113.7", parts[0]);
-        Assert.Equal("https", parts[1]);
-        Assert.Equal("tok", parts[2]);
-        Assert.StartsWith("127.0.0.1", parts[3], StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task Several_requests_share_one_connection()
-    {
-        Start();
-        var relay = await _relay.NextConnectionAsync();
-
-        await using var tls = await relay.OpenTlsAsync(_certificate);
-        for (var i = 0; i < 3; i++)
-        {
-            var (status, body) = await KeepAliveRequestAsync(tls, "/echo?n=" + i);
-            Assert.Equal(200, status);
-            Assert.Equal("/echo?n=" + i, Encoding.UTF8.GetString(body));
-        }
-    }
-
-    [Fact]
-    public async Task A_response_of_unknown_length_arrives_whole()
-    {
-        Start();
-        var relay = await _relay.NextConnectionAsync();
-
-        await using var tls = await relay.OpenTlsAsync(_certificate);
-        var (status, body) = await HttpAsync(tls, "GET", "/stream");
-
-        Assert.Equal(200, status);
-        Assert.Equal("part one,part two", Dechunk(body));
-    }
-
-    [Fact]
     public async Task A_different_certificate_is_not_accepted_by_a_pinned_app()
     {
         Start();
@@ -203,16 +158,16 @@ public sealed class TunnelTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task An_unreachable_server_answers_502()
+    public async Task An_unreachable_server_resets_the_stream()
     {
         _target = new Uri("http://127.0.0.1:1");
         Start();
         var relay = await _relay.NextConnectionAsync();
+        var app = await relay.OpenAsync();
+        var tls = new SslStream(app, leaveInnerStreamOpen: true, (_, _, _, _) => true);
+        await tls.AuthenticateAsClientAsync("key.tunnel.test");
 
-        await using var tls = await relay.OpenTlsAsync(_certificate);
-        var (status, _) = await HttpAsync(tls, "GET", "/echo");
-
-        Assert.Equal(502, status);
+        Assert.True(await app.Ended.Task.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     [Fact]
@@ -249,47 +204,9 @@ public sealed class TunnelTests : IAsyncLifetime
         _run = runner.RunAsync(_stop.Token);
     }
 
-    private static async Task<(int Status, byte[] Body)> KeepAliveRequestAsync(Stream stream, string path)
+    private static async Task<(int Status, byte[] Body)> HttpAsync(Stream stream, string method, string path, byte[]? body = null)
     {
-        await stream.WriteAsync(Encoding.ASCII.GetBytes($"GET {path} HTTP/1.1\r\nHost: x\r\n\r\n"));
-        var head = new List<byte>();
-        var one = new byte[1];
-        while (!(head.Count >= 4 && head[^4] == 13 && head[^3] == 10 && head[^2] == 13 && head[^1] == 10))
-        {
-            Assert.Equal(1, await stream.ReadAsync(one));
-            head.Add(one[0]);
-        }
-
-        var text = Encoding.ASCII.GetString(head.ToArray());
-        var status = int.Parse(text.Split(' ')[1], CultureInfo.InvariantCulture);
-        var length = int.Parse(text.Split("\r\n").First(l => l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))["Content-Length:".Length..].Trim(), CultureInfo.InvariantCulture);
-        var body = new byte[length];
-        await stream.ReadExactlyAsync(body);
-        return (status, body);
-    }
-
-    private static string Dechunk(byte[] raw)
-    {
-        var text = Encoding.UTF8.GetString(raw);
-        var result = new StringBuilder();
-        var offset = 0;
-        while (true)
-        {
-            var lineEnd = text.IndexOf("\r\n", offset, StringComparison.Ordinal);
-            var size = Convert.ToInt32(text[offset..lineEnd], 16);
-            if (size == 0)
-            {
-                return result.ToString();
-            }
-
-            result.Append(text, lineEnd + 2, size);
-            offset = lineEnd + 2 + size + 2;
-        }
-    }
-
-    private static async Task<(int Status, byte[] Body)> HttpAsync(Stream stream, string method, string path, byte[]? body = null, string extraHeaders = "")
-    {
-        var head = $"{method} {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n{extraHeaders}Content-Length: {body?.Length ?? 0}\r\n\r\n";
+        var head = $"{method} {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: {body?.Length ?? 0}\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(head));
         if (body is not null)
         {
@@ -337,16 +254,6 @@ public sealed class TunnelTests : IAsyncLifetime
         {
             case "/echo":
                 await WriteAsync(context, request.Path.Value + request.QueryString.Value);
-                break;
-
-            case "/who":
-                await WriteAsync(context, string.Join("|", request.Headers["X-Forwarded-For"].ToString(), request.Headers["X-Forwarded-Proto"].ToString(), request.Headers["X-Emby-Token"].ToString(), request.Headers.Host.ToString()));
-                break;
-
-            case "/stream":
-                await context.Response.WriteAsync("part one,");
-                await context.Response.Body.FlushAsync();
-                await context.Response.WriteAsync("part two");
                 break;
 
             case "/hash":

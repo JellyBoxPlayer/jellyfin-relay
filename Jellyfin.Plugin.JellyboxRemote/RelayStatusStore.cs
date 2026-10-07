@@ -14,8 +14,6 @@ public sealed class RelayStatusStore
 
     public string? Fingerprint { get; internal set; }
 
-    public string? Notice { get; internal set; }
-
     internal void Report(TunnelStatus status)
     {
         var previous = _current;

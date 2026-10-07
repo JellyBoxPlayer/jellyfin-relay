@@ -8,7 +8,6 @@ public sealed record SeatView(string SeatId, string Label, string Url);
 public sealed record StatusView(
     string State,
     string? Message,
-    string? Notice,
     bool Linked,
     PairingView? Pairing,
     IReadOnlyList<SeatView> Seats);
@@ -74,6 +73,6 @@ public class JellyboxRemoteController(RelayStatusStore status, PairingService pa
     {
         var linked = !string.IsNullOrWhiteSpace(Plugin.Instance?.Configuration.Token);
         var held = seats.Seats.Select(s => new SeatView(s.SeatId, s.Label, s.Url)).ToList();
-        return new StatusView(status.State, status.Message, status.Notice, linked, pairing.Current, held);
+        return new StatusView(status.State, status.Message, linked, pairing.Current, held);
     }
 }

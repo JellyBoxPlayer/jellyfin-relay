@@ -10,4 +10,4 @@ category: "General"
 owner: "ProdigyTech"
 artifacts:
 - "Jellyfin.Plugin.JellyboxRemote.dll"
-changelog: "Seats: each Jellyfin user who listens from outside gets their own address, within your plan; manage them on the plugin page or under Connected devices. Jellyfin now sees listeners' real addresses, so its remote-access rules, bitrate limits and IP filters apply; the plugin stays off while remote connections are disabled in Jellyfin."
+changelog: "Seats: each Jellyfin user who listens from outside gets their own address, within your plan; manage them on the plugin page or under Remote access in Jellybox Cloud; a seat removed there is given up here too."
