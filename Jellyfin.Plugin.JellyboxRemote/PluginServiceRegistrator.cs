@@ -10,6 +10,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<RelayStatusStore>();
         serviceCollection.AddSingleton<PairingService>();
+        serviceCollection.AddSingleton<SeatService>();
         serviceCollection.AddHostedService<RelayService>();
     }
 }

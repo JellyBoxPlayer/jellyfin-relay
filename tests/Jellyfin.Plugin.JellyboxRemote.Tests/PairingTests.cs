@@ -54,6 +54,34 @@ public sealed class PairingTests
     }
 
     [Fact]
+    public async Task A_seat_is_requested_with_the_users_identity()
+    {
+        var cloud = new FakeCloud(_ => Json(HttpStatusCode.Created, """
+            {"id":"seat-1","key":"abc","url":"https://abc.tunnel.test","label":"Alex"}
+            """));
+
+        var result = await Client(cloud).RequestSeatAsync("mib_token", "srv", "jf-alex", "Alex", CancellationToken.None);
+
+        Assert.Equal("https://abc.tunnel.test", result.Seat!.Url);
+        Assert.Null(result.Reason);
+        var (path, body) = Assert.Single(cloud.Requests);
+        Assert.Equal("/base/api/v1/seats", path);
+        Assert.Equal("jf-alex", body.GetProperty("subject").GetString());
+        Assert.Equal("Bearer mib_token", cloud.Sent[0].Headers.Authorization!.ToString());
+    }
+
+    [Fact]
+    public async Task A_full_plan_is_a_reason_not_an_error()
+    {
+        var cloud = new FakeCloud(_ => Json(HttpStatusCode.Conflict, """{"error":{"code":"plan_full"}}"""));
+
+        var result = await Client(cloud).RequestSeatAsync("mib_token", "srv", "jf-kids", "Kids", CancellationToken.None);
+
+        Assert.Null(result.Seat);
+        Assert.Equal("plan_full", result.Reason);
+    }
+
+    [Fact]
     public async Task Logging_out_revokes_the_token_in_the_cloud()
     {
         var cloud = new FakeCloud(_ => new HttpResponseMessage(HttpStatusCode.NoContent));

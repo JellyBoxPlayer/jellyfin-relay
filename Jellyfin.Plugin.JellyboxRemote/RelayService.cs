@@ -1,6 +1,8 @@
 using System.Security.Cryptography.X509Certificates;
 using Jellyfin.Plugin.JellyboxRemote.Cloud;
 using Jellyfin.Plugin.JellyboxRemote.Tunnel;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Common.Net;
 using MediaBrowser.Controller;
 using MediaBrowser.Model.Plugins;
 using Microsoft.Extensions.Hosting;
@@ -8,9 +10,14 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyboxRemote;
 
-internal sealed class RelayService(IServerApplicationHost host, RelayStatusStore status, ILogger<RelayService> logger)
-    : BackgroundService
+internal sealed class RelayService(
+    IServerApplicationHost host,
+    IConfigurationManager configurationManager,
+    RelayStatusStore status,
+    ILogger<RelayService> logger) : BackgroundService
 {
+    private static readonly TimeSpan Recheck = TimeSpan.FromMinutes(1);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var plugin = Plugin.Instance;
@@ -26,24 +33,59 @@ internal sealed class RelayService(IServerApplicationHost host, RelayStatusStore
         {
             var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             void OnChanged(object? sender, BasePluginConfiguration configuration) => changed.TrySetResult();
+            void OnNetworkChanged(object? sender, ConfigurationUpdateEventArgs e)
+            {
+                if (e.Key == "network")
+                {
+                    changed.TrySetResult();
+                }
+            }
 
             plugin.ConfigurationChanged += OnChanged;
+            configurationManager.NamedConfigurationUpdated += OnNetworkChanged;
             using var run = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            var tunnel = Start(plugin, certificate, run.Token);
+            var remoteAllowed = RemoteAccessAllowed();
+            var tunnel = remoteAllowed ? Start(plugin, certificate, run.Token) : Task.CompletedTask;
             try
             {
-                await changed.Task.WaitAsync(stoppingToken).ConfigureAwait(false);
+                await changed.Task.WaitAsync(remoteAllowed ? Timeout.InfiniteTimeSpan : Recheck, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
+            {
+            }
+            catch (TimeoutException)
             {
             }
             finally
             {
                 plugin.ConfigurationChanged -= OnChanged;
+                configurationManager.NamedConfigurationUpdated -= OnNetworkChanged;
                 await run.CancelAsync().ConfigureAwait(false);
                 await tunnel.ConfigureAwait(false);
             }
         }
+    }
+
+    private bool RemoteAccessAllowed()
+    {
+        var network = configurationManager.GetNetworkConfiguration();
+        if (!network.EnableRemoteAccess)
+        {
+            status.Report(new TunnelStatus(
+                TunnelState.Disconnected,
+                Message: "Jellyfin's remote access is off (Dashboard → Networking → Allow remote connections). Turn it on to use the tunnel."));
+            return false;
+        }
+
+        if (!network.KnownProxies.Contains("127.0.0.1", StringComparer.Ordinal))
+        {
+            network.KnownProxies = [.. network.KnownProxies, "127.0.0.1"];
+            configurationManager.SaveConfiguration("network", network);
+            status.Notice = "Restart Jellyfin once: the plugin added itself as a known proxy, so Jellyfin can tell listeners' real addresses apart from local ones.";
+            logger.LogInformation("Added 127.0.0.1 to Jellyfin's known proxies; a restart applies it");
+        }
+
+        return true;
     }
 
     private Task Start(Plugin plugin, X509Certificate2 certificate, CancellationToken cancellationToken)

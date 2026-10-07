@@ -35,10 +35,10 @@ internal sealed class TunnelRunner(
             try
             {
                 using var socket = await _connect(RelayUri(), options.Token, cancellationToken).ConfigureAwait(false);
-                var session = new TunnelSession(socket, options.Target, options.Certificate, logger, url =>
+                var session = new TunnelSession(socket, options.Target, options.Certificate, logger, key =>
                 {
-                    logger.LogInformation("JellyBox relay connected; this server is reachable at {Url}", url);
-                    report(new TunnelStatus(TunnelState.Connected, url));
+                    logger.LogInformation("JellyBox relay connected as server {Key}", key);
+                    report(new TunnelStatus(TunnelState.Connected, key));
                 });
 
                 await session.RunAsync(cancellationToken).ConfigureAwait(false);

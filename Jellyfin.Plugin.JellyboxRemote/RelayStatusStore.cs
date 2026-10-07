@@ -8,18 +8,20 @@ public sealed class RelayStatusStore
 
     public string State => _current.State.ToString();
 
-    public string? Url => _current.Url;
+    public string? Key => _current.Key;
 
     public string? Message => _current.Message;
 
     public string? Fingerprint { get; internal set; }
 
+    public string? Notice { get; internal set; }
+
     internal void Report(TunnelStatus status)
     {
         var previous = _current;
         var stillLinked = status.State is TunnelState.Connecting or TunnelState.Disconnected;
-        _current = stillLinked && status.Url is null && previous.Url is not null
-            ? status with { Url = previous.Url }
+        _current = stillLinked && status.Key is null && previous.Key is not null
+            ? status with { Key = previous.Key }
             : status;
     }
 }

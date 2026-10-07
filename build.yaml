@@ -1,7 +1,7 @@
 ---
 name: "JellyBox Remote Access"
 guid: "5f0c3d2e-8b1a-4c6e-9f47-2a61d3b8e9c4"
-version: "0.4.0.0"
+version: "0.5.0.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Reach this server from JellyBox anywhere, without port forwarding."
@@ -10,4 +10,4 @@ category: "General"
 owner: "ProdigyTech"
 artifacts:
 - "Jellyfin.Plugin.JellyboxRemote.dll"
-changelog: "End-to-end encryption: JellyBox now speaks TLS directly with this server, which holds its own certificate; the relay can no longer read the traffic. Requires the matching JellyBox and Jellybox Cloud."
+changelog: "Seats: each Jellyfin user who listens from outside gets their own address, within your plan; manage them on the plugin page or under Connected devices. Jellyfin now sees listeners' real addresses, so its remote-access rules, bitrate limits and IP filters apply; the plugin stays off while remote connections are disabled in Jellyfin."

@@ -59,7 +59,7 @@ internal sealed class FakeRelay : IAsyncDisposable
         Connects++;
         Queries.Add(context.Request.QueryString.Value ?? string.Empty);
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
-        var welcome = Encoding.UTF8.GetBytes("""{"type":"welcome","url":"https://key.tunnel.test"}""");
+        var welcome = Encoding.UTF8.GetBytes("""{"type":"welcome","key":"serverkey"}""");
         await socket.SendAsync(welcome, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var connection = new RelayConnection(socket);
@@ -99,7 +99,7 @@ internal sealed class RelayConnection(WebSocket socket)
         var id = _next++;
         var stream = new AppStream(id, this);
         _streams[id] = stream;
-        await SendAsync(Frame.Encode(FrameType.Connect, id));
+        await SendAsync(Frame.Encode(FrameType.Connect, id, "203.0.113.7"u8));
         return stream;
     }
 

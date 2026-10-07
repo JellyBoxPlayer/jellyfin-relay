@@ -9,4 +9,4 @@ internal enum TunnelState
     Disconnected,
 }
 
-internal sealed record TunnelStatus(TunnelState State, string? Url = null, string? Message = null);
+internal sealed record TunnelStatus(TunnelState State, string? Key = null, string? Message = null);

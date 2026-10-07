@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -101,7 +102,7 @@ internal sealed class TunnelSession(
             var root = message.RootElement;
             if (root.GetProperty("type").GetString() == "welcome")
             {
-                welcomed(root.GetProperty("url").GetString() ?? string.Empty);
+                welcomed(root.GetProperty("key").GetString() ?? string.Empty);
             }
         }
         catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException)
@@ -116,7 +117,7 @@ internal sealed class TunnelSession(
         switch (frame.Type)
         {
             case FrameType.Connect when stream is null:
-                Open(frame.Stream);
+                Open(frame.Stream, Encoding.UTF8.GetString(frame.Payload.Span));
                 break;
             case FrameType.Data:
                 stream?.OnData(frame.Payload);
@@ -137,9 +138,9 @@ internal sealed class TunnelSession(
         }
     }
 
-    private void Open(uint id)
+    private void Open(uint id, string clientIp)
     {
-        var pipe = new TunnelPipe(id, this, target, certificate, logger);
+        var pipe = new TunnelPipe(id, this, target, certificate, clientIp.Length == 0 ? "unknown" : clientIp, logger);
         _streams[id] = pipe;
         _ = Task.Run(pipe.RunAsync, CancellationToken.None);
     }

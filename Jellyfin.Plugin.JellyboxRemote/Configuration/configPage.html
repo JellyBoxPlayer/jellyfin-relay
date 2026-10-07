@@ -33,13 +33,14 @@
 
                 <div id="jbxLinked" class="paperList" style="display: none; padding: 1em 1.2em; margin-bottom: 2em;">
                     <div><strong>Status:</strong> <span id="jbxState"></span></div>
-                    <div id="jbxUrlRow" style="display: none; margin-top: .6em;">
-                        <strong>Address for JellyBox:</strong>
-                        <code id="jbxUrl" style="user-select: all; word-break: break-all;"></code>
-                    </div>
                     <div id="jbxMessage" class="fieldDescription" style="margin-top: .6em;"></div>
+                    <div id="jbxNotice" class="fieldDescription" style="display: none; margin-top: .6em; color: #e0a000;"></div>
+                    <div style="margin-top: 1em;"><strong>Remote listeners</strong></div>
+                    <div id="jbxSeats" style="margin-top: .4em;"></div>
                     <div class="fieldDescription" style="margin-top: .6em;">
-                        JellyBox picks this address up by itself the next time it is used at home.
+                        A seat is one Jellyfin user listening from outside your home network. It is taken
+                        the first time that user's JellyBox asks for remote access while at home, within
+                        your plan's seats. Users without a password cannot hold one.
                     </div>
                     <button id="jbxUnlink" is="emby-button" type="button" class="raised emby-button" style="margin-top: 1em;">
                         <span>Log out of Jellybox Cloud</span>
@@ -98,9 +99,10 @@
                     show('#jbxUnlinked', !status.Linked && !waiting);
 
                     page.querySelector('#jbxState').textContent = labels[status.State] || status.State;
-                    show('#jbxUrlRow', !!status.Url);
-                    page.querySelector('#jbxUrl').textContent = status.Url || '';
                     page.querySelector('#jbxMessage').textContent = status.State === 'Connected' ? '' : (status.Message || '');
+                    show('#jbxNotice', !!status.Notice);
+                    page.querySelector('#jbxNotice').textContent = status.Notice || '';
+                    renderSeats(status.Seats || []);
 
                     page.querySelector('#jbxPairingMessage').textContent = pairing && !waiting ? (pairing.Message || '') : '';
                     if (waiting) {
@@ -109,6 +111,39 @@
                         verify.href = pairing.VerifyUrlComplete;
                         verify.textContent = pairing.VerifyUrl.replace(/^https?:\/\//, '');
                     }
+                }
+
+                function renderSeats(seats) {
+                    var box = page.querySelector('#jbxSeats');
+                    box.textContent = '';
+                    if (!seats.length) {
+                        var none = document.createElement('div');
+                        none.className = 'fieldDescription';
+                        none.textContent = 'Nobody has listened from outside yet.';
+                        box.appendChild(none);
+                        return;
+                    }
+                    seats.forEach(function (seat) {
+                        var row = document.createElement('div');
+                        row.style.cssText = 'display: flex; align-items: center; gap: .8em; padding: .3em 0;';
+                        var label = document.createElement('span');
+                        label.textContent = seat.Label;
+                        label.style.flex = '1';
+                        var remove = document.createElement('button');
+                        remove.setAttribute('is', 'emby-button');
+                        remove.type = 'button';
+                        remove.className = 'raised emby-button';
+                        remove.textContent = 'Remove';
+                        remove.addEventListener('click', function () {
+                            if (!window.confirm('Remove ' + seat.Label + ' from remote access?')) {
+                                return;
+                            }
+                            call('DELETE', 'Seats/' + encodeURIComponent(seat.SeatId)).then(render);
+                        });
+                        row.appendChild(label);
+                        row.appendChild(remove);
+                        box.appendChild(row);
+                    });
                 }
 
                 function call(method, path) {

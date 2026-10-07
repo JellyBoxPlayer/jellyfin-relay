@@ -22,6 +22,13 @@ internal enum CollectOutcome
 
 internal sealed record CollectResult(CollectOutcome Outcome, string? Token = null);
 
+internal sealed record SeatGrant(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("url")] string Url,
+    [property: JsonPropertyName("label")] string Label);
+
+internal sealed record SeatResult(SeatGrant? Seat, string? Reason);
+
 internal sealed class PairingClient(HttpClient http, Uri cloud)
 {
     public TimeSpan MinimumInterval { get; init; } = TimeSpan.FromSeconds(1);
@@ -64,6 +71,46 @@ internal sealed class PairingClient(HttpClient http, Uri cloud)
                 return new CollectResult(CollectOutcome.Expired);
             default:
                 throw new HttpRequestException("The cloud answered " + (int)response.StatusCode + ".");
+        }
+    }
+
+    public async Task<SeatResult> RequestSeatAsync(string token, string serverId, string subject, string label, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint("api/v1/seats"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Content = JsonContent.Create(new Dictionary<string, string>
+        {
+            ["server_id"] = serverId,
+            ["subject"] = subject,
+            ["label"] = label,
+        });
+
+        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        switch (response.StatusCode)
+        {
+            case HttpStatusCode.Created:
+                var seat = await response.Content.ReadFromJsonAsync<SeatGrant>(cancellationToken).ConfigureAwait(false);
+                return seat is null || string.IsNullOrEmpty(seat.Url)
+                    ? new SeatResult(null, "cloud_unreachable")
+                    : new SeatResult(seat, null);
+            case HttpStatusCode.Conflict:
+                return new SeatResult(null, "plan_full");
+            case HttpStatusCode.Unauthorized:
+            case HttpStatusCode.Forbidden:
+                return new SeatResult(null, "unlinked");
+            default:
+                throw new HttpRequestException("The cloud answered " + (int)response.StatusCode + ".");
+        }
+    }
+
+    public async Task ReleaseSeatAsync(string token, string seatId, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, Endpoint("api/v1/seats/" + Uri.EscapeDataString(seatId)));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode is not (HttpStatusCode.NoContent or HttpStatusCode.NotFound))
+        {
+            response.EnsureSuccessStatusCode();
         }
     }
 
