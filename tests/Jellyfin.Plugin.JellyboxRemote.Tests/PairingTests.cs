@@ -82,6 +82,31 @@ public sealed class PairingTests
     }
 
     [Fact]
+    public async Task Listing_seats_returns_what_the_cloud_still_holds()
+    {
+        var cloud = new FakeCloud(_ => Json(HttpStatusCode.OK, """
+            {"seats":[{"id":"seat-1","key":"abc","url":"https://abc.tunnel.test","label":"Alex"}],"plan":1}
+            """));
+
+        var seats = await Client(cloud).ListSeatsAsync("mib_token", CancellationToken.None);
+
+        var seat = Assert.Single(seats!);
+        Assert.Equal("seat-1", seat.Id);
+        var request = Assert.Single(cloud.Sent);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("/base/api/v1/seats", request.RequestUri!.AbsolutePath);
+        Assert.Equal("Bearer mib_token", request.Headers.Authorization!.ToString());
+    }
+
+    [Fact]
+    public async Task Listing_seats_with_a_dropped_token_says_so_instead_of_guessing()
+    {
+        var cloud = new FakeCloud(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
+
+        Assert.Null(await Client(cloud).ListSeatsAsync("mib_token", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Logging_out_revokes_the_token_in_the_cloud()
     {
         var cloud = new FakeCloud(_ => new HttpResponseMessage(HttpStatusCode.NoContent));

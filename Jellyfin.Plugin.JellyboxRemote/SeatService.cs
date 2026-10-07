@@ -12,7 +12,11 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
 
+    private static readonly TimeSpan ReconcileEvery = TimeSpan.FromMinutes(5);
+
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    private DateTime _reconciledAt = DateTime.MinValue;
 
     public IReadOnlyList<SeatAssignment> Seats => Plugin.Instance?.Configuration.Seats ?? [];
 
@@ -35,12 +39,6 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
             return new SeatLookup(null, "no_password");
         }
 
-        var existing = plugin.Configuration.Seats.FirstOrDefault(s => s.UserId == userId.ToString("N"));
-        if (existing is not null)
-        {
-            return new SeatLookup(existing.Url, null);
-        }
-
         if (!CloudAddress.TryParse(plugin.Configuration.CloudUrl, out var cloud))
         {
             return new SeatLookup(null, "cloud_unreachable");
@@ -49,13 +47,15 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var raced = plugin.Configuration.Seats.FirstOrDefault(s => s.UserId == userId.ToString("N"));
-            if (raced is not null)
+            var client = new PairingClient(Http, cloud);
+            await ReconcileAsync(plugin, client, cancellationToken).ConfigureAwait(false);
+
+            var existing = plugin.Configuration.Seats.FirstOrDefault(s => s.UserId == userId.ToString("N"));
+            if (existing is not null)
             {
-                return new SeatLookup(raced.Url, null);
+                return new SeatLookup(existing.Url, null);
             }
 
-            var client = new PairingClient(Http, cloud);
             var result = await client.RequestSeatAsync(
                 plugin.Configuration.Token.Trim(),
                 host.SystemId,
@@ -89,6 +89,46 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
         {
             _gate.Release();
         }
+    }
+
+    private async Task ReconcileAsync(Plugin plugin, PairingClient client, CancellationToken cancellationToken)
+    {
+        if (DateTime.UtcNow - _reconciledAt < ReconcileEvery)
+        {
+            return;
+        }
+
+        IReadOnlyList<SeatGrant>? held;
+        try
+        {
+            held = await client.ListSeatsAsync(plugin.Configuration.Token.Trim(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+        {
+            logger.LogWarning("Could not check seats with Jellybox Cloud: {Message}", e.Message);
+            return;
+        }
+
+        _reconciledAt = DateTime.UtcNow;
+        if (held is null)
+        {
+            return;
+        }
+
+        var configuration = plugin.Configuration;
+        var stale = configuration.Seats.Where(s => held.All(h => h.Id != s.SeatId)).ToList();
+        if (stale.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var seat in stale)
+        {
+            configuration.Seats.Remove(seat);
+            logger.LogInformation("Seat for {Label} is gone from Jellybox Cloud; it will be asked for again", seat.Label);
+        }
+
+        plugin.SaveConfiguration();
     }
 
     public async Task ReleaseAsync(string seatId, CancellationToken cancellationToken)
