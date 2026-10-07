@@ -1,13 +1,16 @@
 using System.Globalization;
+using System.Net.Security;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using System.Text.Json;
 using Jellyfin.Plugin.JellyboxRemote.Tunnel;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Jellyfin.Plugin.JellyboxRemote.Tests;
@@ -19,16 +22,26 @@ public sealed class TunnelTests : IAsyncLifetime
     private readonly TaskCompletionSource _hangAborted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _stop = new();
     private readonly List<TunnelStatus> _statuses = [];
+    private readonly string _state = Path.Combine(Path.GetTempPath(), "jellybox-tunnel-" + Guid.NewGuid());
     private FakeRelay _relay = null!;
-    private IHost _upstream = null!;
+    private WebApplication _upstream = null!;
+    private Uri _target = null!;
+    private X509Certificate2 _certificate = null!;
     private Task _run = Task.CompletedTask;
 
     public async Task InitializeAsync()
     {
         _relay = await FakeRelay.StartAsync();
-        _upstream = await new HostBuilder()
-            .ConfigureWebHost(web => web.UseTestServer().Configure(app => app.Run(UpstreamAsync)))
-            .StartAsync();
+        _certificate = AgentCertificate.LoadOrCreate(Path.Combine(_state, "tunnel.pfx"));
+
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+        _upstream = builder.Build();
+        _upstream.Run(UpstreamAsync);
+        await _upstream.StartAsync();
+        var address = _upstream.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
+        _target = new Uri(address);
     }
 
     public async Task DisposeAsync()
@@ -36,8 +49,9 @@ public sealed class TunnelTests : IAsyncLifetime
         await _stop.CancelAsync();
         await _run;
         await _relay.DisposeAsync();
-        await _upstream.StopAsync();
-        _upstream.Dispose();
+        await _upstream.DisposeAsync();
+        _certificate.Dispose();
+        Directory.Delete(_state, recursive: true);
     }
 
     [Fact]
@@ -52,177 +66,108 @@ public sealed class TunnelTests : IAsyncLifetime
         Assert.True(Frame.TryDecode(Frame.EncodeWindow(7, 65_536), out var window));
         Assert.Equal(65_536, window.WindowBytes);
 
-        Assert.False(Frame.TryDecode(new byte[] { 9, 0, 0, 0, 1 }, out _));
-        Assert.False(Frame.TryDecode(new byte[] { 1, 0 }, out _));
+        Assert.False(Frame.TryDecode(new byte[] { 1, 0, 0, 0, 1 }, out _));
+        Assert.False(Frame.TryDecode(new byte[] { 3, 0 }, out _));
     }
 
     [Fact]
-    public async Task Connects_with_its_identity_and_reports_the_address()
+    public void The_certificate_is_kept_across_restarts()
+    {
+        using var again = AgentCertificate.LoadOrCreate(Path.Combine(_state, "tunnel.pfx"));
+        Assert.Equal(AgentCertificate.Fingerprint(_certificate), AgentCertificate.Fingerprint(again));
+        Assert.Equal(64, AgentCertificate.Fingerprint(again).Length);
+    }
+
+    [Fact]
+    public async Task Connects_with_its_identity_and_fingerprint_and_reports_the_address()
     {
         Start();
         await _relay.NextConnectionAsync();
 
-        Assert.Contains("server_id=srv%201", _relay.Queries[0], StringComparison.Ordinal);
-        Assert.Contains("server_type=jellyfin", _relay.Queries[0], StringComparison.Ordinal);
-        await Eventually(() => _statuses.Any(s => s is { State: TunnelState.Connected, Url: "https://relay.test/r/key" }));
+        var query = _relay.Queries[0];
+        Assert.Contains("server_id=srv%201", query, StringComparison.Ordinal);
+        Assert.Contains("server_type=jellyfin", query, StringComparison.Ordinal);
+        Assert.Contains("fingerprint=" + AgentCertificate.Fingerprint(_certificate), query, StringComparison.Ordinal);
+        await Eventually(() => _statuses.Any(s => s is { State: TunnelState.Connected, Url: "https://key.tunnel.test" }));
     }
 
     [Fact]
-    public async Task A_get_reaches_the_server_under_its_base_path()
+    public async Task The_app_speaks_tls_with_the_agent_and_reaches_the_server()
     {
         Start();
         var relay = await _relay.NextConnectionAsync();
 
-        await relay.RequestAsync(1, "GET", "/echo?limit=5&x=a%20b", ("x-emby-token", "abc"), ("host", "relay.test"), ("connection", "keep-alive"));
-        await relay.SendAsync(Frame.Encode(FrameType.End, 1));
+        await using var tls = await relay.OpenTlsAsync(_certificate);
+        var (status, body) = await HttpAsync(tls, "GET", "/echo?limit=5");
 
-        var (status, headers, body) = await relay.ReadResponseAsync(1);
         Assert.Equal(200, status);
-        Assert.StartsWith("application/json", headers["content-type"], StringComparison.Ordinal);
-
-        using var echo = JsonDocument.Parse(body);
-        Assert.Equal("/jf/echo", echo.RootElement.GetProperty("path").GetString());
-        Assert.Equal("?limit=5&x=a%20b", echo.RootElement.GetProperty("query").GetString());
-        Assert.Equal("abc", echo.RootElement.GetProperty("token").GetString());
-        Assert.NotEqual("relay.test", echo.RootElement.GetProperty("host").GetString());
+        Assert.Equal("/echo?limit=5", Encoding.UTF8.GetString(body));
     }
 
     [Fact]
-    public async Task An_upload_arrives_intact_and_is_granted_back()
+    public async Task A_different_certificate_is_not_accepted_by_a_pinned_app()
+    {
+        Start();
+        var relay = await _relay.NextConnectionAsync();
+        using var other = AgentCertificate.LoadOrCreate(Path.Combine(_state, "other.pfx"));
+
+        await Assert.ThrowsAsync<System.Security.Authentication.AuthenticationException>(() => relay.OpenTlsAsync(other));
+    }
+
+    [Fact]
+    public async Task A_large_response_arrives_whole_within_the_window()
+    {
+        Start();
+        var relay = await _relay.NextConnectionAsync();
+
+        await using var tls = await relay.OpenTlsAsync(_certificate);
+        var (status, body) = await HttpAsync(tls, "GET", "/big");
+
+        Assert.Equal(200, status);
+        Assert.Equal(Big, body);
+    }
+
+    [Fact]
+    public async Task An_upload_arrives_intact()
     {
         Start();
         var relay = await _relay.NextConnectionAsync();
         var upload = RandomNumberGenerator.GetBytes(600 * 1024);
 
-        await relay.RequestAsync(1, "POST", "/hash", ("content-type", "application/octet-stream"));
-        var window = Frame.InitialWindow;
-        var granted = 0;
-        for (var offset = 0; offset < upload.Length;)
-        {
-            if (window == 0)
-            {
-                var grant = await relay.ReceiveAsync();
-                Assert.Equal(FrameType.Window, grant.Type);
-                window += grant.WindowBytes;
-                granted += grant.WindowBytes;
-                continue;
-            }
+        await using var tls = await relay.OpenTlsAsync(_certificate);
+        var (status, body) = await HttpAsync(tls, "POST", "/hash", upload);
 
-            var size = Math.Min(Math.Min(window, Frame.MaxData), upload.Length - offset);
-            await relay.SendAsync(Frame.Encode(FrameType.Data, 1, upload.AsSpan(offset, size)));
-            offset += size;
-            window -= size;
-        }
-
-        await relay.SendAsync(Frame.Encode(FrameType.End, 1));
-
-        var (status, _, body) = await relay.ReadResponseAsync(1);
         Assert.Equal(200, status);
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(upload)), Encoding.UTF8.GetString(body));
-        Assert.True(granted > 0);
     }
 
     [Fact]
-    public async Task A_large_response_never_exceeds_the_window()
+    public async Task The_app_hanging_up_ends_the_server_connection()
     {
         Start();
         var relay = await _relay.NextConnectionAsync();
+        var app = await relay.OpenAsync();
+        var tls = new SslStream(app, leaveInnerStreamOpen: true, (_, _, _, _) => true);
+        await tls.AuthenticateAsClientAsync("key.tunnel.test");
+        await tls.WriteAsync(Encoding.ASCII.GetBytes("GET /hang HTTP/1.1\r\nHost: x\r\n\r\n"));
+        await tls.ReadAtLeastAsync(new byte[256], 1);
 
-        await relay.RequestAsync(1, "GET", "/big");
-        await relay.SendAsync(Frame.Encode(FrameType.End, 1));
+        await app.ResetAsync();
 
-        var head = await relay.ReceiveAsync();
-        Assert.Equal(FrameType.Response, head.Type);
-
-        var received = new MemoryStream();
-        var inFlight = 0;
-        var peak = 0;
-        while (true)
-        {
-            var frame = await relay.ReceiveAsync();
-            if (frame.Type == FrameType.End)
-            {
-                break;
-            }
-
-            inFlight += frame.Payload.Length;
-            peak = Math.Max(peak, inFlight);
-            Assert.True(inFlight <= Frame.InitialWindow, $"{inFlight} bytes unacknowledged");
-            received.Write(frame.Payload.Span);
-
-            if (inFlight >= Frame.InitialWindow)
-            {
-                await relay.SendAsync(Frame.EncodeWindow(1, inFlight));
-                inFlight = 0;
-            }
-        }
-
-        Assert.Equal(Big, received.ToArray());
-        Assert.Equal(Frame.InitialWindow, peak);
-    }
-
-    [Fact]
-    public async Task A_range_response_keeps_its_status_and_length()
-    {
-        Start();
-        var relay = await _relay.NextConnectionAsync();
-
-        await relay.RequestAsync(1, "GET", "/range", ("range", "bytes=10-19"));
-        await relay.SendAsync(Frame.Encode(FrameType.End, 1));
-
-        var (status, headers, body) = await relay.ReadResponseAsync(1);
-        Assert.Equal(206, status);
-        Assert.Equal("10", headers["content-length"]);
-        Assert.Equal("bytes 10-19/100", headers["content-range"]);
-        Assert.Equal("0123456789", Encoding.UTF8.GetString(body));
-    }
-
-    [Fact]
-    public async Task A_reset_cancels_the_upstream_request()
-    {
-        Start();
-        var relay = await _relay.NextConnectionAsync();
-
-        await relay.RequestAsync(1, "GET", "/hang");
-        await relay.SendAsync(Frame.Encode(FrameType.End, 1));
-        var head = await relay.ReceiveAsync();
-        Assert.Equal(FrameType.Response, head.Type);
-
-        await relay.SendAsync(Frame.Encode(FrameType.Reset, 1));
         await _hangAborted.Task.WaitAsync(TimeSpan.FromSeconds(10));
-
-        await relay.SendAsync(Frame.Encode(FrameType.Reset, 1));
-        await relay.RequestAsync(2, "GET", "/range");
-        await relay.SendAsync(Frame.Encode(FrameType.End, 2));
-        var (status, _, _) = await relay.ReadResponseAsync(2);
-        Assert.Equal(206, status);
     }
 
     [Fact]
-    public async Task An_unreachable_server_answers_502()
+    public async Task An_unreachable_server_resets_the_stream()
     {
-        Start(new HttpClient(new FailingHandler()));
-        var relay = await _relay.NextConnectionAsync();
-
-        await relay.RequestAsync(1, "GET", "/echo");
-        await relay.SendAsync(Frame.Encode(FrameType.End, 1));
-
-        var (status, headers, body) = await relay.ReadResponseAsync(1);
-        Assert.Equal(502, status);
-        Assert.Equal(body.Length.ToString(CultureInfo.InvariantCulture), headers["content-length"]);
-        Assert.Contains("unreachable", Encoding.UTF8.GetString(body), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task A_malformed_request_is_reset()
-    {
+        _target = new Uri("http://127.0.0.1:1");
         Start();
         var relay = await _relay.NextConnectionAsync();
+        var app = await relay.OpenAsync();
+        var tls = new SslStream(app, leaveInnerStreamOpen: true, (_, _, _, _) => true);
+        await tls.AuthenticateAsClientAsync("key.tunnel.test");
 
-        await relay.SendAsync(Frame.Encode(FrameType.Request, 1, "not json"u8));
-        var frame = await relay.ReceiveAsync();
-        Assert.Equal(FrameType.Reset, frame.Type);
-        Assert.Equal(1u, frame.Stream);
+        Assert.True(await app.Ended.Task.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     [Fact]
@@ -235,13 +180,12 @@ public sealed class TunnelTests : IAsyncLifetime
         var second = await _relay.NextConnectionAsync();
         Assert.Equal(2, _relay.Connects);
 
-        await second.RequestAsync(1, "GET", "/range");
-        await second.SendAsync(Frame.Encode(FrameType.End, 1));
-        var (status, _, _) = await second.ReadResponseAsync(1);
-        Assert.Equal(206, status);
+        await using var tls = await second.OpenTlsAsync(_certificate);
+        var (status, _) = await HttpAsync(tls, "GET", "/echo");
+        Assert.Equal(200, status);
     }
 
-    private void Start(HttpClient? upstream = null)
+    private void Start()
     {
         var options = new TunnelOptions(
             new Uri("ws://relay.test/relay/agent"),
@@ -249,15 +193,33 @@ public sealed class TunnelTests : IAsyncLifetime
             "srv 1",
             "jellyfin",
             "test",
-            new Uri("http://upstream.test/jf/"));
+            _target,
+            _certificate);
 
-        var client = upstream ?? new HttpClient(_upstream.GetTestServer().CreateHandler());
-        var runner = new TunnelRunner(options, client, NullLogger.Instance, s => { lock (_statuses) { _statuses.Add(s); } }, _relay.Connector)
+        var runner = new TunnelRunner(options, NullLogger.Instance, s => { lock (_statuses) { _statuses.Add(s); } }, _relay.Connector)
         {
             InitialBackoff = TimeSpan.FromMilliseconds(20),
         };
 
         _run = runner.RunAsync(_stop.Token);
+    }
+
+    private static async Task<(int Status, byte[] Body)> HttpAsync(Stream stream, string method, string path, byte[]? body = null)
+    {
+        var head = $"{method} {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: {body?.Length ?? 0}\r\n\r\n";
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(head));
+        if (body is not null)
+        {
+            await stream.WriteAsync(body);
+        }
+
+        using var response = new MemoryStream();
+        await stream.CopyToAsync(response).WaitAsync(TimeSpan.FromSeconds(20));
+        var bytes = response.ToArray();
+        var split = bytes.AsSpan().IndexOf("\r\n\r\n"u8);
+        var headers = Encoding.ASCII.GetString(bytes, 0, split);
+        var status = int.Parse(headers.Split(' ')[1], CultureInfo.InvariantCulture);
+        return (status, bytes[(split + 4)..]);
     }
 
     private async Task Eventually(Func<bool> condition)
@@ -278,44 +240,37 @@ public sealed class TunnelTests : IAsyncLifetime
         Assert.Fail("condition never became true");
     }
 
+    private static Task WriteAsync(HttpContext context, string text)
+    {
+        var bytes = Encoding.UTF8.GetBytes(text);
+        context.Response.ContentLength = bytes.Length;
+        return context.Response.Body.WriteAsync(bytes).AsTask();
+    }
+
     private async Task UpstreamAsync(HttpContext context)
     {
         var request = context.Request;
         switch (request.Path.Value)
         {
-            case "/jf/echo":
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsJsonAsync(new
-                {
-                    path = request.Path.Value,
-                    query = request.QueryString.Value,
-                    token = request.Headers["x-emby-token"].ToString(),
-                    host = request.Host.Value,
-                });
+            case "/echo":
+                await WriteAsync(context, request.Path.Value + request.QueryString.Value);
                 break;
 
-            case "/jf/hash":
+            case "/hash":
                 using (var buffer = new MemoryStream())
                 {
                     await request.Body.CopyToAsync(buffer);
-                    await context.Response.WriteAsync(Convert.ToHexStringLower(SHA256.HashData(buffer.ToArray())));
+                    await WriteAsync(context, Convert.ToHexStringLower(SHA256.HashData(buffer.ToArray())));
                 }
 
                 break;
 
-            case "/jf/big":
+            case "/big":
                 context.Response.ContentLength = Big.Length;
                 await context.Response.Body.WriteAsync(Big);
                 break;
 
-            case "/jf/range":
-                context.Response.StatusCode = 206;
-                context.Response.ContentLength = 10;
-                context.Response.Headers.ContentRange = "bytes 10-19/100";
-                await context.Response.WriteAsync("0123456789");
-                break;
-
-            case "/jf/hang":
+            case "/hang":
                 await context.Response.Body.WriteAsync(new byte[] { 1 });
                 await context.Response.Body.FlushAsync();
                 try
@@ -333,11 +288,5 @@ public sealed class TunnelTests : IAsyncLifetime
                 context.Response.StatusCode = 404;
                 break;
         }
-    }
-
-    private sealed class FailingHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new HttpRequestException("connection refused");
     }
 }

@@ -1,18 +1,24 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyboxRemote.Tunnel;
 
-internal sealed class TunnelSession(WebSocket socket, HttpClient client, Uri target, ILogger logger, Action<string> welcomed)
+internal sealed class TunnelSession(
+    WebSocket socket,
+    Uri target,
+    X509Certificate2 certificate,
+    ILogger logger,
+    Action<string> welcomed)
 {
     public const int ReplacedCloseStatus = 4000;
 
     private readonly Channel<byte[]> _outbox = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
-    private readonly ConcurrentDictionary<uint, TunnelStream> _streams = new();
+    private readonly ConcurrentDictionary<uint, TunnelPipe> _streams = new();
 
     public bool Replaced => (int?)socket.CloseStatus == ReplacedCloseStatus;
 
@@ -109,8 +115,8 @@ internal sealed class TunnelSession(WebSocket socket, HttpClient client, Uri tar
         _streams.TryGetValue(frame.Stream, out var stream);
         switch (frame.Type)
         {
-            case FrameType.Request when stream is null:
-                Open(frame);
+            case FrameType.Connect when stream is null:
+                Open(frame.Stream);
                 break;
             case FrameType.Data:
                 stream?.OnData(frame.Payload);
@@ -131,25 +137,10 @@ internal sealed class TunnelSession(WebSocket socket, HttpClient client, Uri tar
         }
     }
 
-    private void Open(Frame frame)
+    private void Open(uint id)
     {
-        RequestHead? head = null;
-        try
-        {
-            head = JsonSerializer.Deserialize<RequestHead>(frame.Payload.Span);
-        }
-        catch (JsonException)
-        {
-        }
-
-        if (head is null || string.IsNullOrEmpty(head.Method) || head.Path is null || head.Headers is null)
-        {
-            Send(Frame.Encode(FrameType.Reset, frame.Stream, "malformed request"u8));
-            return;
-        }
-
-        var stream = new TunnelStream(frame.Stream, head, this, client, target);
-        _streams[frame.Stream] = stream;
-        _ = Task.Run(stream.RunAsync, CancellationToken.None);
+        var pipe = new TunnelPipe(id, this, target, certificate, logger);
+        _streams[id] = pipe;
+        _ = Task.Run(pipe.RunAsync, CancellationToken.None);
     }
 }

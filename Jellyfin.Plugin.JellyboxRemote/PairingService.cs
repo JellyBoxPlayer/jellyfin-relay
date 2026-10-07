@@ -4,7 +4,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyboxRemote;
 
-public sealed record PairingView(string State, string? Code, string? VerifyUrl, string? VerifyUrlComplete, string? Message);
+public sealed record PairingView(
+    string State,
+    string? Code = null,
+    string? VerifyUrl = null,
+    string? VerifyUrlComplete = null,
+    string? Message = null);
 
 public sealed class PairingService(IServerApplicationHost host, ILogger<PairingService> logger) : IDisposable
 {
@@ -30,7 +35,7 @@ public sealed class PairingService(IServerApplicationHost host, ILogger<PairingS
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("The plugin is not loaded.");
         if (!CloudAddress.TryParse(plugin.Configuration.CloudUrl, out var cloud))
         {
-            return Show(new PairingView("Failed", null, null, null, "The cloud address is not a valid URL."));
+            return Show(new PairingView("Failed", Message: "The cloud address is not a valid URL."));
         }
 
         var run = new CancellationTokenSource();
@@ -57,12 +62,39 @@ public sealed class PairingService(IServerApplicationHost host, ILogger<PairingS
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
             logger.LogWarning("Could not get a pairing code from {Cloud}: {Message}", cloud, e.Message);
-            return Show(new PairingView("Failed", null, null, null, "Could not reach Jellybox Cloud: " + e.Message));
+            return Show(new PairingView("Failed", Message: "Could not reach Jellybox Cloud: " + e.Message));
         }
 
-        var view = Show(new PairingView("Waiting", code.Code, code.VerifyUrl, code.VerifyUrlComplete, null));
+        var view = Show(new PairingView("Waiting", code.Code, code.VerifyUrl, code.VerifyUrlComplete));
         _ = Task.Run(() => WaitAsync(client, code, plugin, run.Token), CancellationToken.None);
         return view;
+    }
+
+    public async Task LogOutAsync()
+    {
+        var plugin = Plugin.Instance ?? throw new InvalidOperationException("The plugin is not loaded.");
+        var configuration = plugin.Configuration;
+        var token = configuration.Token.Trim();
+        Cancel();
+
+        if (token.Length > 0 && CloudAddress.TryParse(configuration.CloudUrl, out var cloud))
+        {
+            try
+            {
+                await new PairingClient(Http, cloud).SignOutAsync(token, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+            {
+                logger.LogWarning("Could not tell Jellybox Cloud about the log out: {Message}", e.Message);
+                Show(new PairingView(
+                    "Failed",
+                    Message: "Logged out here, but Jellybox Cloud could not be reached. Remove this server under Connected devices there."));
+            }
+        }
+
+        configuration.Token = string.Empty;
+        plugin.UpdateConfiguration(configuration);
+        logger.LogInformation("Logged this server out of Jellybox Cloud");
     }
 
     public void Cancel()
@@ -98,7 +130,7 @@ public sealed class PairingService(IServerApplicationHost host, ILogger<PairingS
 
         if (token is null)
         {
-            Show(new PairingView("Expired", null, null, null, "The code expired before it was entered."));
+            Show(new PairingView("Expired", Message: "The code expired before it was entered."));
             return;
         }
 

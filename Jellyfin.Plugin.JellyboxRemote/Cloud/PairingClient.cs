@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 
@@ -63,6 +64,17 @@ internal sealed class PairingClient(HttpClient http, Uri cloud)
                 return new CollectResult(CollectOutcome.Expired);
             default:
                 throw new HttpRequestException("The cloud answered " + (int)response.StatusCode + ".");
+        }
+    }
+
+    public async Task SignOutAsync(string token, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, Endpoint("api/v1/sessions"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode != HttpStatusCode.Unauthorized)
+        {
+            response.EnsureSuccessStatusCode();
         }
     }
 

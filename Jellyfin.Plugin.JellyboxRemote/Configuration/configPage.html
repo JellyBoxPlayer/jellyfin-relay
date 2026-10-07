@@ -42,7 +42,7 @@
                         JellyBox picks this address up by itself the next time it is used at home.
                     </div>
                     <button id="jbxUnlink" is="emby-button" type="button" class="raised emby-button" style="margin-top: 1em;">
-                        <span>Unlink</span>
+                        <span>Log out of Jellybox Cloud</span>
                     </button>
                 </div>
 
@@ -74,7 +74,7 @@
                     NotConfigured: 'Not linked',
                     Connecting: 'Connecting…',
                     Connected: 'Connected',
-                    TokenRefused: 'Jellybox Cloud refused this server. Unlink and link it again.',
+                    TokenRefused: 'Jellybox Cloud logged this server out. Log out here and link it again.',
                     Disconnected: 'Disconnected, retrying'
                 };
                 var page = document.querySelector('#JellyboxRemotePage');
@@ -150,11 +150,11 @@
                 });
 
                 page.querySelector('#jbxUnlink').addEventListener('click', function () {
-                    if (!window.confirm('Unlink this server? JellyBox will stop reaching it from outside your home network.')) {
+                    if (!window.confirm('Log this server out of Jellybox Cloud? JellyBox will stop reaching it from outside your home network.')) {
                         return;
                     }
 
-                    call('POST', 'Unlink').then(function (status) {
+                    call('POST', 'LogOut').then(function (status) {
                         render(status);
                         loadConfig();
                     });

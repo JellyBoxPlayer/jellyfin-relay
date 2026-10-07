@@ -1,4 +1,4 @@
-using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using Jellyfin.Plugin.JellyboxRemote.Cloud;
 using Jellyfin.Plugin.JellyboxRemote.Tunnel;
 using MediaBrowser.Controller;
@@ -19,14 +19,8 @@ internal sealed class RelayService(IServerApplicationHost host, RelayStatusStore
             return;
         }
 
-        using var handler = new SocketsHttpHandler
-        {
-            AllowAutoRedirect = false,
-            AutomaticDecompression = DecompressionMethods.None,
-            UseCookies = false,
-            UseProxy = false,
-        };
-        using var upstream = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        using var certificate = AgentCertificate.LoadOrCreate(Path.Combine(plugin.DataFolderPath, "tunnel.pfx"));
+        status.Fingerprint = AgentCertificate.Fingerprint(certificate);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -35,7 +29,7 @@ internal sealed class RelayService(IServerApplicationHost host, RelayStatusStore
 
             plugin.ConfigurationChanged += OnChanged;
             using var run = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            var tunnel = Start(plugin, upstream, run.Token);
+            var tunnel = Start(plugin, certificate, run.Token);
             try
             {
                 await changed.Task.WaitAsync(stoppingToken).ConfigureAwait(false);
@@ -52,7 +46,7 @@ internal sealed class RelayService(IServerApplicationHost host, RelayStatusStore
         }
     }
 
-    private Task Start(Plugin plugin, HttpClient upstream, CancellationToken cancellationToken)
+    private Task Start(Plugin plugin, X509Certificate2 certificate, CancellationToken cancellationToken)
     {
         var configuration = plugin.Configuration;
         var token = configuration.Token.Trim();
@@ -74,8 +68,9 @@ internal sealed class RelayService(IServerApplicationHost host, RelayStatusStore
             host.SystemId,
             "jellyfin",
             typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0",
-            new Uri(host.GetLocalApiUrl("127.0.0.1", Uri.UriSchemeHttp, host.HttpPort)));
+            new Uri(host.GetLocalApiUrl("127.0.0.1", Uri.UriSchemeHttp, host.HttpPort)),
+            certificate);
 
-        return new TunnelRunner(options, upstream, logger, status.Report).RunAsync(cancellationToken);
+        return new TunnelRunner(options, logger, status.Report).RunAsync(cancellationToken);
     }
 }

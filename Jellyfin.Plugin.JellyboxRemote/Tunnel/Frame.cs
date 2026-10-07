@@ -4,12 +4,11 @@ namespace Jellyfin.Plugin.JellyboxRemote.Tunnel;
 
 internal enum FrameType : byte
 {
-    Request = 1,
-    Response = 2,
     Data = 3,
     End = 4,
     Reset = 5,
     Window = 6,
+    Connect = 7,
 }
 
 internal readonly record struct Frame(FrameType Type, uint Stream, ReadOnlyMemory<byte> Payload)
@@ -37,7 +36,7 @@ internal readonly record struct Frame(FrameType Type, uint Stream, ReadOnlyMemor
     public static bool TryDecode(ReadOnlyMemory<byte> message, out Frame frame)
     {
         frame = default;
-        if (message.Length < HeaderSize || message.Span[0] is < 1 or > 6)
+        if (message.Length < HeaderSize || message.Span[0] is < 3 or > 7)
         {
             return false;
         }

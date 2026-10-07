@@ -1,3 +1,5 @@
+using System.Security.Cryptography.X509Certificates;
+
 namespace Jellyfin.Plugin.JellyboxRemote.Tunnel;
 
 internal sealed record TunnelOptions(
@@ -6,4 +8,5 @@ internal sealed record TunnelOptions(
     string ServerId,
     string ServerType,
     string Version,
-    Uri Target);
+    Uri Target,
+    X509Certificate2 Certificate);

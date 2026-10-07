@@ -54,13 +54,24 @@ public sealed class PairingTests
     }
 
     [Fact]
-    public async Task A_cloud_without_remote_access_says_so()
+    public async Task Logging_out_revokes_the_token_in_the_cloud()
     {
-        var cloud = new FakeCloud(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        var cloud = new FakeCloud(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
 
-        var error = await Assert.ThrowsAsync<HttpRequestException>(
-            () => Client(cloud).StartAsync("srv", "jellyfin", "x", CancellationToken.None));
-        Assert.Contains("remote access", error.Message, StringComparison.Ordinal);
+        await Client(cloud).SignOutAsync("mib_token", CancellationToken.None);
+
+        var request = Assert.Single(cloud.Sent);
+        Assert.Equal(HttpMethod.Delete, request.Method);
+        Assert.Equal("/base/api/v1/sessions", request.RequestUri!.AbsolutePath);
+        Assert.Equal("Bearer mib_token", request.Headers.Authorization!.ToString());
+    }
+
+    [Fact]
+    public async Task Logging_out_a_token_the_cloud_already_dropped_is_not_an_error()
+    {
+        var cloud = new FakeCloud(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
+
+        await Client(cloud).SignOutAsync("mib_token", CancellationToken.None);
     }
 
     [Theory]
@@ -91,10 +102,17 @@ public sealed class PairingTests
     {
         public List<(string Path, JsonElement Body)> Requests { get; } = [];
 
+        public List<HttpRequestMessage> Sent { get; } = [];
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
-            Requests.Add((request.RequestUri!.AbsolutePath, JsonDocument.Parse(body).RootElement.Clone()));
+            Sent.Add(request);
+            if (request.Content is not null)
+            {
+                var body = await request.Content.ReadAsStringAsync(cancellationToken);
+                Requests.Add((request.RequestUri!.AbsolutePath, JsonDocument.Parse(body).RootElement.Clone()));
+            }
+
             return answer(request);
         }
     }

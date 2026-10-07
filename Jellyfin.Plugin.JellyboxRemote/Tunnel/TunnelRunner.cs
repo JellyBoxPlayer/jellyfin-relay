@@ -12,7 +12,6 @@ internal delegate Task<WebSocket> RelayConnector(Uri relay, string token, Cancel
 
 internal sealed class TunnelRunner(
     TunnelOptions options,
-    HttpClient upstream,
     ILogger logger,
     Action<TunnelStatus> report,
     RelayConnector? connect = null)
@@ -36,7 +35,7 @@ internal sealed class TunnelRunner(
             try
             {
                 using var socket = await _connect(RelayUri(), options.Token, cancellationToken).ConfigureAwait(false);
-                var session = new TunnelSession(socket, upstream, options.Target, logger, url =>
+                var session = new TunnelSession(socket, options.Target, options.Certificate, logger, url =>
                 {
                     logger.LogInformation("JellyBox relay connected; this server is reachable at {Url}", url);
                     report(new TunnelStatus(TunnelState.Connected, url));
@@ -88,7 +87,8 @@ internal sealed class TunnelRunner(
     {
         var query = $"server_id={Uri.EscapeDataString(options.ServerId)}" +
                     $"&server_type={Uri.EscapeDataString(options.ServerType)}" +
-                    $"&version={Uri.EscapeDataString(options.Version)}";
+                    $"&version={Uri.EscapeDataString(options.Version)}" +
+                    $"&fingerprint={AgentCertificate.Fingerprint(options.Certificate)}";
         return new UriBuilder(options.RelayUrl) { Query = query }.Uri;
     }
 

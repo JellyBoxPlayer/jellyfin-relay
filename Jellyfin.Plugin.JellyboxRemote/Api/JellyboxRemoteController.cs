@@ -1,12 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Jellyfin.Plugin.JellyboxRemote.Api;
 
 public sealed record StatusView(string State, string? Url, string? Message, bool Linked, PairingView? Pairing);
 
-public sealed record InfoView(string? Url, bool Connected);
+public sealed record InfoView(string? Url, string? Fingerprint, bool Connected);
 
 [ApiController]
 [Route("JellyboxRemote")]
@@ -32,25 +31,18 @@ public class JellyboxRemoteController(RelayStatusStore status, PairingService pa
         return Status();
     }
 
-    [HttpPost("Unlink")]
+    [HttpPost("LogOut")]
     [Authorize(Policy = "RequiresElevation")]
-    public ActionResult<StatusView> Unlink()
+    public async Task<ActionResult<StatusView>> LogOut()
     {
-        var plugin = Plugin.Instance;
-        if (plugin is not null)
-        {
-            var configuration = plugin.Configuration;
-            configuration.Token = string.Empty;
-            plugin.UpdateConfiguration(configuration);
-        }
-
+        await pairing.LogOutAsync().ConfigureAwait(false);
         return Status();
     }
 
     [HttpGet("Info")]
     [Authorize]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public ActionResult<InfoView> GetInfo() => new InfoView(status.Url, status.State == "Connected");
+    public ActionResult<InfoView> GetInfo() =>
+        new InfoView(status.Url, status.Fingerprint, status.State == "Connected");
 
     private StatusView Status()
     {

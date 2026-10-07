@@ -12,10 +12,13 @@ public sealed class RelayStatusStore
 
     public string? Message => _current.Message;
 
+    public string? Fingerprint { get; internal set; }
+
     internal void Report(TunnelStatus status)
     {
         var previous = _current;
-        _current = status.State == TunnelState.Connecting && previous.Url is not null
+        var stillLinked = status.State is TunnelState.Connecting or TunnelState.Disconnected;
+        _current = stillLinked && status.Url is null && previous.Url is not null
             ? status with { Url = previous.Url }
             : status;
     }

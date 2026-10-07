@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
+using System.Net.Security;
 using System.Net.WebSockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using System.Text.Json;
 using System.Threading.Channels;
 using Jellyfin.Plugin.JellyboxRemote.Tunnel;
 using Microsoft.AspNetCore.Builder;
@@ -57,20 +59,24 @@ internal sealed class FakeRelay : IAsyncDisposable
         Connects++;
         Queries.Add(context.Request.QueryString.Value ?? string.Empty);
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
-        var welcome = Encoding.UTF8.GetBytes("""{"type":"welcome","url":"https://relay.test/r/key"}""");
+        var welcome = Encoding.UTF8.GetBytes("""{"type":"welcome","url":"https://key.tunnel.test"}""");
         await socket.SendAsync(welcome, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var connection = new RelayConnection(socket);
         await _connections.Writer.WriteAsync(connection);
-        await connection.Closed.Task;
+        await connection.RunAsync();
     }
 }
 
 internal sealed class RelayConnection(WebSocket socket)
 {
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly ConcurrentDictionary<uint, AppStream> _streams = new();
+    private readonly Channel<Frame> _unrouted = Channel.CreateUnbounded<Frame>();
+    private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private uint _next = 1;
 
-    public TaskCompletionSource Closed { get; } = new();
+    public void Close() => _closed.TrySetResult();
 
     public async Task SendAsync(byte[] frame)
     {
@@ -79,75 +85,168 @@ internal sealed class RelayConnection(WebSocket socket)
         {
             await socket.SendAsync(frame, WebSocketMessageType.Binary, true, CancellationToken.None);
         }
+        catch (WebSocketException)
+        {
+        }
         finally
         {
             _sendLock.Release();
         }
     }
 
-    public Task RequestAsync(uint stream, string method, string path, params (string Name, string Value)[] headers)
+    public async Task<AppStream> OpenAsync()
     {
-        var head = new { method, path, headers = headers.Select(h => new[] { h.Name, h.Value }) };
-        return SendAsync(Frame.Encode(FrameType.Request, stream, JsonSerializer.SerializeToUtf8Bytes(head)));
+        var id = _next++;
+        var stream = new AppStream(id, this);
+        _streams[id] = stream;
+        await SendAsync(Frame.Encode(FrameType.Connect, id));
+        return stream;
     }
 
-    public async Task<Frame> ReceiveAsync()
+    public async Task<SslStream> OpenTlsAsync(X509Certificate2? expected = null)
+    {
+        var tls = new SslStream(await OpenAsync(), leaveInnerStreamOpen: false, (_, certificate, _, _) =>
+            expected is null || certificate?.GetRawCertData().AsSpan().SequenceEqual(expected.RawData) == true);
+        await tls.AuthenticateAsClientAsync("key.tunnel.test").WaitAsync(TimeSpan.FromSeconds(10));
+        return tls;
+    }
+
+    public async Task<Frame> NextUnroutedAsync() =>
+        await _unrouted.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+    public async Task RunAsync()
+    {
+        var reading = ReadAsync();
+        await Task.WhenAny(reading, _closed.Task);
+    }
+
+    private async Task ReadAsync()
     {
         var buffer = new byte[1024 * 1024];
-        var total = 0;
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        WebSocketReceiveResult result;
-        do
+        while (socket.State == WebSocketState.Open)
         {
-            result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer, total, buffer.Length - total), timeout.Token);
-            total += result.Count;
-        }
-        while (!result.EndOfMessage);
+            var total = 0;
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer, total, buffer.Length - total), CancellationToken.None);
+                total += result.Count;
+            }
+            while (!result.EndOfMessage);
 
-        Assert.True(Frame.TryDecode(buffer.AsMemory(0, total).ToArray(), out var frame));
-        return frame;
-    }
-
-    public async Task<(int Status, Dictionary<string, string> Headers, byte[] Body)> ReadResponseAsync(uint stream, bool grant = true)
-    {
-        Frame head;
-        do
-        {
-            head = await ReceiveAsync();
-        }
-        while (head.Type == FrameType.Window || head.Stream != stream);
-
-        Assert.Equal(FrameType.Response, head.Type);
-        Assert.Equal(stream, head.Stream);
-        using var json = JsonDocument.Parse(head.Payload);
-        var status = json.RootElement.GetProperty("status").GetInt32();
-        var headers = json.RootElement.GetProperty("headers").EnumerateArray()
-            .ToDictionary(h => h[0].GetString()!, h => h[1].GetString()!);
-
-        var body = new MemoryStream();
-        while (true)
-        {
-            var frame = await ReceiveAsync();
-            if (frame.Stream != stream)
+            if (result.MessageType == WebSocketMessageType.Close || !Frame.TryDecode(buffer.AsMemory(0, total).ToArray(), out var frame))
             {
                 continue;
             }
 
-            if (frame.Type == FrameType.End)
+            if (_streams.TryGetValue(frame.Stream, out var stream))
             {
-                break;
+                stream.Receive(frame);
             }
-
-            Assert.Equal(FrameType.Data, frame.Type);
-            body.Write(frame.Payload.Span);
-            if (grant)
+            else
             {
-                await SendAsync(Frame.EncodeWindow(stream, frame.Payload.Length));
+                await _unrouted.Writer.WriteAsync(frame);
             }
         }
+    }
+}
 
-        return (status, headers, body.ToArray());
+internal sealed class AppStream(uint id, RelayConnection relay) : Stream
+{
+    private readonly Channel<byte[]> _incoming = Channel.CreateUnbounded<byte[]>();
+    private readonly FlowWindow _window = new(Frame.InitialWindow);
+    private ReadOnlyMemory<byte> _current;
+
+    public TaskCompletionSource<bool> Ended { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public int Acknowledged { get; private set; }
+
+    public override bool CanRead => true;
+
+    public override bool CanSeek => false;
+
+    public override bool CanWrite => true;
+
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
     }
 
-    public void Close() => Closed.TrySetResult();
+    public void Receive(Frame frame)
+    {
+        switch (frame.Type)
+        {
+            case FrameType.Data:
+                _incoming.Writer.TryWrite(frame.Payload.ToArray());
+                break;
+            case FrameType.Window:
+                Acknowledged += frame.WindowBytes;
+                _window.Grant(frame.WindowBytes);
+                break;
+            case FrameType.End:
+                Ended.TrySetResult(false);
+                _incoming.Writer.TryComplete();
+                break;
+            case FrameType.Reset:
+                Ended.TrySetResult(true);
+                _incoming.Writer.TryComplete();
+                break;
+        }
+    }
+
+    public Task HangUpAsync() => relay.SendAsync(Frame.Encode(FrameType.End, id));
+
+    public Task ResetAsync() => relay.SendAsync(Frame.Encode(FrameType.Reset, id));
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        while (_current.IsEmpty)
+        {
+            if (!await _incoming.Reader.WaitToReadAsync(cancellationToken))
+            {
+                return 0;
+            }
+
+            _incoming.Reader.TryRead(out var chunk);
+            _current = chunk;
+            await relay.SendAsync(Frame.EncodeWindow(id, chunk!.Length));
+        }
+
+        var count = Math.Min(buffer.Length, _current.Length);
+        _current[..count].CopyTo(buffer);
+        _current = _current[count..];
+        return count;
+    }
+
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        var offset = 0;
+        while (offset < buffer.Length)
+        {
+            var allowed = await _window.TakeAsync(Math.Min(buffer.Length - offset, Frame.MaxData), cancellationToken);
+            await relay.SendAsync(Frame.Encode(FrameType.Data, id, buffer.Span.Slice(offset, allowed)));
+            offset += allowed;
+        }
+    }
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+        ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+        WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+    public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer, offset, count).GetAwaiter().GetResult();
+
+    public override void Write(byte[] buffer, int offset, int count) => WriteAsync(buffer, offset, count).GetAwaiter().GetResult();
+
+    public override void Flush()
+    {
+    }
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
 }
