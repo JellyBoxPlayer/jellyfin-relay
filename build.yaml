@@ -7,6 +7,7 @@ framework: "net9.0"
 overview: "Reach this server from JellyBox anywhere, without port forwarding."
 description: "Keeps one outbound connection to Jellybox Cloud, so JellyBox can reach this server from outside your home network. Link it to your Jellybox Cloud account from the plugin page."
 category: "General"
+imageUrl: "https://raw.githubusercontent.com/JellyBoxPlayer/jellyfin-relay/master/images/thumb.png"
 owner: "ProdigyTech"
 artifacts:
 - "Jellyfin.Plugin.JellyboxRemote.dll"

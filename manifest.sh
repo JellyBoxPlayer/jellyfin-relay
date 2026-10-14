@@ -23,6 +23,7 @@ jq -n \
   --arg overview "$(field overview)" \
   --arg owner "$(field owner)" \
   --arg category "$(field category)" \
+  --arg imageUrl "$(field imageUrl)" \
   --arg version "$(field version)" \
   --arg changelog "$(field changelog)" \
   --arg targetAbi "$(field targetAbi)" \
@@ -45,4 +46,4 @@ jq -n \
       checksum: $checksum,
       timestamp: $timestamp
     }] + ($versions | map(select(.version != $version))))
-  }]'
+  } + (if $imageUrl == "" then {} else {imageUrl: $imageUrl} end)]'
