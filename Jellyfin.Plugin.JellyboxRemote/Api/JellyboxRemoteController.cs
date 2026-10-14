@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.JellyboxRemote.Tunnel;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,9 +11,16 @@ public sealed record StatusView(
     string? Message,
     bool Linked,
     PairingView? Pairing,
-    IReadOnlyList<SeatView> Seats);
+    IReadOnlyList<SeatView> Seats,
+    RelayNotice? Notice);
 
-public sealed record InfoView(string? Url, string? Fingerprint, bool Connected, string? Reason);
+public sealed record InfoView(
+    string? Url,
+    string? Fingerprint,
+    bool Connected,
+    string? Reason,
+    string PluginVersion,
+    RelayNotice? Notice);
 
 [ApiController]
 [Route("JellyboxRemote")]
@@ -62,17 +70,17 @@ public class JellyboxRemoteController(RelayStatusStore status, PairingService pa
         var claim = User.FindFirst("Jellyfin-UserId")?.Value;
         if (!Guid.TryParse(claim, out var userId))
         {
-            return new InfoView(null, status.Fingerprint, status.State == "Connected", "unknown_user");
+            return new InfoView(null, status.Fingerprint, status.State == "Connected", "unknown_user", Plugin.Release, status.Notice);
         }
 
         var seat = await seats.ForUserAsync(userId, cancellationToken).ConfigureAwait(false);
-        return new InfoView(seat.Url, status.Fingerprint, status.State == "Connected", seat.Reason);
+        return new InfoView(seat.Url, status.Fingerprint, status.State == "Connected", seat.Reason, Plugin.Release, status.Notice);
     }
 
     private StatusView Status()
     {
         var linked = Plugin.Instance?.Token.IsSet ?? false;
         var held = seats.Seats.Select(s => new SeatView(s.SeatId, s.Label, s.Url)).ToList();
-        return new StatusView(status.State, status.Message, linked, pairing.Current, held);
+        return new StatusView(status.State, status.Message, linked, pairing.Current, held, status.Notice);
     }
 }

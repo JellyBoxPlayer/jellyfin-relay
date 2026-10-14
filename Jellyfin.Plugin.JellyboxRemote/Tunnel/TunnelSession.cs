@@ -13,7 +13,8 @@ internal sealed class TunnelSession(
     Uri target,
     X509Certificate2 certificate,
     ILogger logger,
-    Action<string> welcomed)
+    Action<string> welcomed,
+    Action<RelayNotice> noticed)
 {
     public const int ReplacedCloseStatus = 4000;
 
@@ -99,9 +100,17 @@ internal sealed class TunnelSession(
         {
             using var message = JsonDocument.Parse(text.ToArray());
             var root = message.RootElement;
-            if (root.GetProperty("type").GetString() == "welcome")
+            switch (root.GetProperty("type").GetString())
             {
-                welcomed(root.GetProperty("key").GetString() ?? string.Empty);
+                case "welcome":
+                    welcomed(root.GetProperty("key").GetString() ?? string.Empty);
+                    break;
+                case "notice":
+                    noticed(new RelayNotice(
+                        root.GetProperty("code").GetString() ?? string.Empty,
+                        root.GetProperty("level").GetString() ?? "info",
+                        root.GetProperty("message").GetString() ?? string.Empty));
+                    break;
             }
         }
         catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException)

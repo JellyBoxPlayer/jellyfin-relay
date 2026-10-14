@@ -22,6 +22,7 @@ public sealed class TunnelTests : IAsyncLifetime
     private readonly TaskCompletionSource _hangAborted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _stop = new();
     private readonly List<TunnelStatus> _statuses = [];
+    private readonly List<RelayNotice> _notices = [];
     private readonly string _state = Path.Combine(Path.GetTempPath(), "jellybox-tunnel-" + Guid.NewGuid());
     private FakeRelay _relay = null!;
     private WebApplication _upstream = null!;
@@ -89,6 +90,18 @@ public sealed class TunnelTests : IAsyncLifetime
         Assert.Contains("server_type=jellyfin", query, StringComparison.Ordinal);
         Assert.Contains("fingerprint=" + AgentCertificate.Fingerprint(_certificate), query, StringComparison.Ordinal);
         await Eventually(() => _statuses.Any(s => s is { State: TunnelState.Connected, Key: "serverkey" }));
+    }
+
+    [Fact]
+    public async Task Passes_on_what_the_relay_says_and_ignores_what_it_cannot_read()
+    {
+        _relay.Greetings.Add("""{"type":"notice","code":"update_available","level":"warning","message":"Update the plugin.","version":"9.0.0.0"}""");
+        _relay.Greetings.Add("""{"type":"something_new","whatever":1}""");
+        Start();
+
+        await Eventually(() => _notices.Count == 1);
+        Assert.Equal(new RelayNotice("update_available", "warning", "Update the plugin."), _notices.Single());
+        Assert.Contains(_statuses, s => s.State == TunnelState.Connected);
     }
 
     [Fact]
@@ -196,7 +209,7 @@ public sealed class TunnelTests : IAsyncLifetime
             _target,
             _certificate);
 
-        var runner = new TunnelRunner(options, NullLogger.Instance, s => { lock (_statuses) { _statuses.Add(s); } }, _relay.Connector)
+        var runner = new TunnelRunner(options, NullLogger.Instance, s => { lock (_statuses) { _statuses.Add(s); } }, _relay.Connector, n => { lock (_statuses) { _notices.Add(n); } })
         {
             InitialBackoff = TimeSpan.FromMilliseconds(20),
         };

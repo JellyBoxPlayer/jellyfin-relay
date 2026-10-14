@@ -13,7 +13,7 @@ public sealed record PairingView(
 
 public sealed class PairingService(IServerApplicationHost host, ILogger<PairingService> logger) : IDisposable
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private static readonly HttpClient Http = CloudHttp.Create();
 
     private readonly object _gate = new();
     private CancellationTokenSource? _running;

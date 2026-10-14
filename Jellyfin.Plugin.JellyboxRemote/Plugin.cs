@@ -24,6 +24,8 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     public static Plugin? Instance { get; private set; }
 
+    public static string Release { get; } = typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0";
+
     public TokenStore Token { get; }
 
     public override void UpdateConfiguration(BasePluginConfiguration configuration)

@@ -24,6 +24,8 @@ internal sealed class FakeRelay : IAsyncDisposable
 
     public List<string> Queries { get; } = [];
 
+    public List<string> Greetings { get; } = [];
+
     public static async Task<FakeRelay> StartAsync()
     {
         FakeRelay? relay = null;
@@ -61,6 +63,10 @@ internal sealed class FakeRelay : IAsyncDisposable
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
         var welcome = Encoding.UTF8.GetBytes("""{"type":"welcome","key":"serverkey"}""");
         await socket.SendAsync(welcome, WebSocketMessageType.Text, true, CancellationToken.None);
+        foreach (var greeting in Greetings)
+        {
+            await socket.SendAsync(Encoding.UTF8.GetBytes(greeting), WebSocketMessageType.Text, true, CancellationToken.None);
+        }
 
         var connection = new RelayConnection(socket);
         await _connections.Writer.WriteAsync(connection);

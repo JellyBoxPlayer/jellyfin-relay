@@ -14,8 +14,17 @@ public sealed class RelayStatusStore
 
     public string? Fingerprint { get; internal set; }
 
+    public RelayNotice? Notice { get; private set; }
+
+    internal void ReportNotice(RelayNotice notice) => Notice = notice;
+
     internal void Report(TunnelStatus status)
     {
+        if (status.State is TunnelState.Connected or TunnelState.NotConfigured)
+        {
+            Notice = null;
+        }
+
         var previous = _current;
         var stillLinked = status.State is TunnelState.Connecting or TunnelState.Disconnected;
         _current = stillLinked && status.Key is null && previous.Key is not null

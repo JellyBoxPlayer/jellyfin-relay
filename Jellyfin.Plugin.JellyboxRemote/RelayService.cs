@@ -67,10 +67,10 @@ internal sealed class RelayService(IServerApplicationHost host, RelayStatusStore
             token,
             host.SystemId,
             "jellyfin",
-            typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0",
+            Plugin.Release,
             new Uri(host.GetLocalApiUrl("127.0.0.1", Uri.UriSchemeHttp, host.HttpPort)),
             certificate);
 
-        return new TunnelRunner(options, logger, status.Report).RunAsync(cancellationToken);
+        return new TunnelRunner(options, logger, status.Report, noticed: status.ReportNotice).RunAsync(cancellationToken);
     }
 }

@@ -14,7 +14,8 @@ internal sealed class TunnelRunner(
     TunnelOptions options,
     ILogger logger,
     Action<TunnelStatus> report,
-    RelayConnector? connect = null)
+    RelayConnector? connect = null,
+    Action<RelayNotice>? noticed = null)
 {
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan StableConnection = TimeSpan.FromSeconds(30);
@@ -39,6 +40,10 @@ internal sealed class TunnelRunner(
                 {
                     logger.LogInformation("JellyBox relay connected as server {Key}", key);
                     report(new TunnelStatus(TunnelState.Connected, key));
+                }, notice =>
+                {
+                    logger.LogWarning("JellyBox relay: {Message}", notice.Message);
+                    noticed?.Invoke(notice);
                 });
 
                 await session.RunAsync(cancellationToken).ConfigureAwait(false);

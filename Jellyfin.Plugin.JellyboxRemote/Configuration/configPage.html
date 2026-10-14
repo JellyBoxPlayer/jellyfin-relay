@@ -11,6 +11,8 @@
                 <h2 class="sectionTitle">JellyBox Remote Access</h2>
                 <p>Makes this server reachable from JellyBox outside your home network, without opening ports.</p>
 
+                <div id="jbxNotice" class="paperList" style="display: none; padding: 1em 1.2em; margin-bottom: 2em; border-left: 4px solid #e0a030;"></div>
+
                 <div id="jbxUnlinked" class="paperList" style="display: none; padding: 1em 1.2em; margin-bottom: 2em;">
                     <p style="margin-top: 0;">Link this server to your Jellybox Cloud account to turn on remote access.</p>
                     <button id="jbxLink" is="emby-button" type="button" class="raised button-submit emby-button">
@@ -100,6 +102,10 @@
                     page.querySelector('#jbxState').textContent = labels[status.State] || status.State;
                     page.querySelector('#jbxMessage').textContent = status.State === 'Connected' ? '' : (status.Message || '');
                     renderSeats(status.Seats || []);
+
+                    var notice = status.Notice;
+                    show('#jbxNotice', !!notice);
+                    page.querySelector('#jbxNotice').textContent = notice ? notice.Message : '';
 
                     page.querySelector('#jbxPairingMessage').textContent = pairing && !waiting ? (pairing.Message || '') : '';
                     if (waiting) {

@@ -19,4 +19,23 @@ public sealed class RelayStatusStoreTests
         store.Report(new TunnelStatus(TunnelState.NotConfigured));
         Assert.Null(store.Key);
     }
+
+    [Fact]
+    public void A_notice_lasts_until_the_next_connection_or_a_log_out()
+    {
+        var store = new RelayStatusStore();
+        var notice = new RelayNotice("update_available", "warning", "Update the plugin.");
+        store.Report(new TunnelStatus(TunnelState.Connected, "serverkey"));
+        store.ReportNotice(notice);
+
+        store.Report(new TunnelStatus(TunnelState.Disconnected));
+        Assert.Equal(notice, store.Notice);
+
+        store.Report(new TunnelStatus(TunnelState.Connected, "serverkey"));
+        Assert.Null(store.Notice);
+
+        store.ReportNotice(notice);
+        store.Report(new TunnelStatus(TunnelState.NotConfigured));
+        Assert.Null(store.Notice);
+    }
 }
