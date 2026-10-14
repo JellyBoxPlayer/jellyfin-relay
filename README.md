@@ -18,8 +18,8 @@ All content and data E2E encrypted. Jellybox cloud have no idea what passed thro
 3. Dashboard → Plugins → JellyBox Remote Access → *Link to Jellybox Cloud*.
 4. Open the link the page shows, sign in, and enter the code.
 
-The page then shows the server as connected. JellyBox picks up the remote
-address by itself the next time it is used on your home network.
+The page then shows the server as connected. JellyBox Player picks up the remote
+address by itself the next time it is used on your home network. This is done for security reasons.
 
 ## Installing by hand
 
