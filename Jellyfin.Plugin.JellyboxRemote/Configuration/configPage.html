@@ -47,31 +47,10 @@
                         <span>Log out of Jellybox Cloud</span>
                     </button>
                 </div>
-
-                <details style="margin-bottom: 1.5em;">
-                    <summary>Advanced</summary>
-                    <form id="JellyboxRemoteForm" style="margin-top: 1em;">
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="jbxCloudUrl">Cloud address</label>
-                            <input id="jbxCloudUrl" name="CloudUrl" type="text" is="emby-input" />
-                            <div class="fieldDescription">Leave as is unless you run your own cloud.</div>
-                        </div>
-                        <div class="inputContainer">
-                            <label class="inputLabel inputLabelUnfocused" for="jbxToken">Token</label>
-                            <input id="jbxToken" name="Token" type="password" is="emby-input" autocomplete="off" />
-                            <div class="fieldDescription">Set by linking and never shown here. Paste a token with the <em>Publish a music server</em> permission to replace it.</div>
-                        </div>
-                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
-                            <span>Save</span>
-                        </button>
-                    </form>
-                </details>
             </div>
         </div>
         <script type="text/javascript">
             (function () {
-                var pluginId = '5f0c3d2e-8b1a-4c6e-9f47-2a61d3b8e9c4';
-                var defaultCloud = 'https://cloud.jellybox.app';
                 var labels = {
                     NotConfigured: 'Not linked',
                     Connecting: 'Connecting…',
@@ -81,7 +60,6 @@
                 };
                 var page = document.querySelector('#JellyboxRemotePage');
                 var timer = null;
-                var linked = null;
 
                 function show(id, visible) {
                     page.querySelector(id).style.display = visible ? 'block' : 'none';
@@ -90,11 +68,6 @@
                 function render(status) {
                     var pairing = status.Pairing;
                     var waiting = !!pairing && pairing.State === 'Waiting';
-                    if (linked !== null && linked !== status.Linked) {
-                        loadConfig();
-                    }
-                    linked = status.Linked;
-
                     show('#jbxLinked', status.Linked);
                     show('#jbxPairing', !status.Linked && waiting);
                     show('#jbxUnlinked', !status.Linked && !waiting);
@@ -157,16 +130,7 @@
                     call('GET', 'Status').then(render);
                 }
 
-                function loadConfig() {
-                    return ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-                        page.querySelector('#jbxToken').value = '';
-                        page.querySelector('#jbxCloudUrl').value = config.CloudUrl || defaultCloud;
-                    });
-                }
-
                 page.addEventListener('pageshow', function () {
-                    Dashboard.showLoadingMsg();
-                    loadConfig().then(Dashboard.hideLoadingMsg);
                     refresh();
                     timer = setInterval(refresh, 2000);
                 });
@@ -192,27 +156,7 @@
                         return;
                     }
 
-                    call('POST', 'LogOut').then(function (status) {
-                        render(status);
-                        loadConfig();
-                    });
-                });
-
-                page.querySelector('#JellyboxRemoteForm').addEventListener('submit', function (e) {
-                    e.preventDefault();
-                    Dashboard.showLoadingMsg();
-                    ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-                        var token = page.querySelector('#jbxToken').value.trim();
-                        if (token) {
-                            config.Token = token;
-                        }
-                        config.CloudUrl = page.querySelector('#jbxCloudUrl').value.trim() || defaultCloud;
-                        ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
-                            Dashboard.processPluginConfigurationUpdateResult(result);
-                            setTimeout(refresh, 1000);
-                        });
-                    });
-                    return false;
+                    call('POST', 'LogOut').then(render);
                 });
             })();
         </script>
