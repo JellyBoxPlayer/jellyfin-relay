@@ -4,7 +4,10 @@ Makes a Jellyfin server reachable from JellyBox outside your home network. The
 plugin keeps one outbound connection to Jellybox Cloud, so you don't need to
 open any ports.
 
-Requires Jellyfin 10.11.
+Requires Jellyfin 10.11 or newer.
+
+## Security
+All content and data E2E encrypted. Jellybox cloud have no idea what passed through it. 
 
 ## Setup
 
