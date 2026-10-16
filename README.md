@@ -1,13 +1,13 @@
 # JellyBox Remote Access for Jellyfin
 
 Makes a Jellyfin server reachable from JellyBox outside your home network. The
-plugin keeps one outbound connection to Jellybox Cloud, so you don't need to
+plugin keeps one outbound connection to Jellybox Link, so you don't need to
 open any ports.
 
 Requires Jellyfin 10.11 or newer.
 
 ## Security
-All content and data E2E encrypted. Jellybox cloud have no idea what passed through it. 
+All content and data E2E encrypted. Jellybox Link has no idea what passed through it. 
 
 ## Setup
 
@@ -15,7 +15,7 @@ All content and data E2E encrypted. Jellybox cloud have no idea what passed thro
    `https://github.com/JellyBoxPlayer/jellyfin-relay/releases/latest/download/manifest.json`.
 2. Dashboard → Plugins → Catalog → install JellyBox Remote Access and restart
    Jellyfin.
-3. Dashboard → Plugins → JellyBox Remote Access → *Link to Jellybox Cloud*.
+3. Dashboard → Plugins → JellyBox Remote Access → *Connect to Jellybox Link*.
 4. Open the link the page shows, sign in, and enter the code.
 
 The page then shows the server as connected. JellyBox Player picks up the remote

@@ -82,7 +82,7 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
-            logger.LogWarning("Could not ask Jellybox Cloud for a seat: {Message}", e.Message);
+            logger.LogWarning("Could not ask Jellybox Link for a seat: {Message}", e.Message);
             return new SeatLookup(null, "cloud_unreachable");
         }
         finally
@@ -105,7 +105,7 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
-            logger.LogWarning("Could not check seats with Jellybox Cloud: {Message}", e.Message);
+            logger.LogWarning("Could not check seats with Jellybox Link: {Message}", e.Message);
             return;
         }
 
@@ -125,7 +125,7 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
         foreach (var seat in stale)
         {
             configuration.Seats.Remove(seat);
-            logger.LogInformation("Seat for {Label} is gone from Jellybox Cloud; it will be asked for again", seat.Label);
+            logger.LogInformation("Seat for {Label} is gone from Jellybox Link; it will be asked for again", seat.Label);
         }
 
         plugin.SaveConfiguration();
@@ -154,7 +154,7 @@ public sealed class SeatService(IServerApplicationHost host, IUserManager users,
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
             {
-                logger.LogWarning("Could not tell Jellybox Cloud the seat was released: {Message}", e.Message);
+                logger.LogWarning("Could not tell Jellybox Link the seat was released: {Message}", e.Message);
             }
         }
 

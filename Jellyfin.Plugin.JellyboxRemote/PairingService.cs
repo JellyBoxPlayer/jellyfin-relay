@@ -62,7 +62,7 @@ public sealed class PairingService(IServerApplicationHost host, ILogger<PairingS
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
             logger.LogWarning("Could not get a pairing code from {Cloud}: {Message}", cloud, e.Message);
-            return Show(new PairingView("Failed", Message: "Could not reach Jellybox Cloud: " + e.Message));
+            return Show(new PairingView("Failed", Message: "Could not reach Jellybox Link: " + e.Message));
         }
 
         var view = Show(new PairingView("Waiting", code.Code, code.VerifyUrl, code.VerifyUrlComplete));
@@ -85,16 +85,16 @@ public sealed class PairingService(IServerApplicationHost host, ILogger<PairingS
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
             {
-                logger.LogWarning("Could not tell Jellybox Cloud about the log out: {Message}", e.Message);
+                logger.LogWarning("Could not tell Jellybox Link about the log out: {Message}", e.Message);
                 Show(new PairingView(
                     "Failed",
-                    Message: "Logged out here, but Jellybox Cloud could not be reached. Remove this server under Connected devices there."));
+                    Message: "Logged out here, but Jellybox Link could not be reached. Remove this server under Connected devices there."));
             }
         }
 
         plugin.Token.Clear();
         plugin.UpdateConfiguration(configuration);
-        logger.LogInformation("Logged this server out of Jellybox Cloud");
+        logger.LogInformation("Logged this server out of Jellybox Link");
     }
 
     public void Cancel()
@@ -136,7 +136,7 @@ public sealed class PairingService(IServerApplicationHost host, ILogger<PairingS
 
         plugin.Token.Set(token);
         plugin.UpdateConfiguration(plugin.Configuration);
-        logger.LogInformation("Linked this server to Jellybox Cloud");
+        logger.LogInformation("Connected this server to Jellybox Link");
         Cancel();
     }
 

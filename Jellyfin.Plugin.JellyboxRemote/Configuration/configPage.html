@@ -14,9 +14,9 @@
                 <div id="jbxNotice" class="paperList" style="display: none; padding: 1em 1.2em; margin-bottom: 2em; border-left: 4px solid #e0a030;"></div>
 
                 <div id="jbxUnlinked" class="paperList" style="display: none; padding: 1em 1.2em; margin-bottom: 2em;">
-                    <p style="margin-top: 0;">Link this server to your Jellybox Cloud account to turn on remote access.</p>
+                    <p style="margin-top: 0;">Connect this server to your Jellybox Link account to turn on remote access.</p>
                     <button id="jbxLink" is="emby-button" type="button" class="raised button-submit emby-button">
-                        <span>Link to Jellybox Cloud</span>
+                        <span>Connect to Jellybox Link</span>
                     </button>
                     <div id="jbxPairingMessage" class="fieldDescription" style="margin-top: .8em;"></div>
                 </div>
@@ -44,7 +44,7 @@
                         your plan's seats. Users without a password cannot hold one.
                     </div>
                     <button id="jbxUnlink" is="emby-button" type="button" class="raised emby-button" style="margin-top: 1em;">
-                        <span>Log out of Jellybox Cloud</span>
+                        <span>Log out of Jellybox Link</span>
                     </button>
                 </div>
             </div>
@@ -55,7 +55,7 @@
                     NotConfigured: 'Not linked',
                     Connecting: 'Connecting…',
                     Connected: 'Connected',
-                    TokenRefused: 'Jellybox Cloud logged this server out. Log out here and link it again.',
+                    TokenRefused: 'Jellybox Link logged this server out. Log out here and connect it again.',
                     Disconnected: 'Disconnected, retrying'
                 };
                 var page = document.querySelector('#JellyboxRemotePage');
@@ -152,7 +152,7 @@
                 });
 
                 page.querySelector('#jbxUnlink').addEventListener('click', function () {
-                    if (!window.confirm('Log this server out of Jellybox Cloud? JellyBox will stop reaching it from outside your home network.')) {
+                    if (!window.confirm('Log this server out of Jellybox Link? JellyBox will stop reaching it from outside your home network.')) {
                         return;
                     }
 
